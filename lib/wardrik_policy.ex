@@ -51,18 +51,18 @@ defmodule WardrikPolicy do
   alias WardrikPolicy.Decision
   alias WardrikPolicy.Judge
   alias WardrikPolicy.Name
-  alias WardrikPolicy.Rule
   alias WardrikPolicy.Rules
 
   defstruct name: nil, rules: [], default: :allow, budget: nil, judge: nil
 
   @type t() :: %__MODULE__{
           name: String.t() | nil,
-          rules: [Rule.t()],
-          default: Rule.effect(),
+          rules: list(),
+          default: effect(),
           budget: Budget.t() | nil,
           judge: Judge.t() | nil
         }
+  @type effect() :: :allow | :ask | :deny
   @type decision() :: :allow | {:ask, String.t()} | {:deny, String.t()}
 
   @keys ~w(allow ask deny default)
