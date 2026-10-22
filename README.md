@@ -1,6 +1,6 @@
 # WardrikPolicy
 
-Rules that decide every tool call an agent makes: run it, ask a person first, or refuse it.
+Budgets that cap what an agent spends, and rules that decide every tool call it makes.
 
 ## Install
 
@@ -10,6 +10,52 @@ def deps do
     {:wardrik_policy, "~> 0.1"}
   ]
 end
+```
+
+## Cap what an agent spends
+
+```elixir
+policy = WardrikPolicy.new!(budget: [usd: 5.00, per: :day])
+
+WardrikPolicy.Budget.check(policy.budget, %{usd: 5.02})
+#=> {:ask, "This agent has spent $5.02 of $5.00 today. Approve to allow $5.00 more."}
+```
+
+Check before each model call, against what the calls before it spent. The call that crosses the
+limit runs, and the next one asks. Approving it allows another `grant`'s worth.
+
+| Key | Takes | Unless set |
+| --- | --- | --- |
+| `usd` | a limit in US dollars | no dollar limit |
+| `tokens` | a limit in tokens, input and output together | no token limit |
+| `per` | `:turn`, `:day`, `:week`, `:month` or `:total` | `:day` |
+| `timezone` | where a day, week or month begins, as `"Europe/Berlin"` | `"Etc/UTC"` |
+| `grant` | how much more an approval allows, as `[usd: 2.00]` | another limit |
+| `price` | dollars per million tokens, as `[input: 0.60, output: 2.20]` | the cost the model reports |
+| `on_exhausted` | `:ask` a person, or `:deny` and end the turn | `:ask` |
+
+A timezone other than UTC needs a time zone database, like [tz](https://hex.pm/packages/tz).
+
+With WardrikCore, the middleware checks each model call and counts what it spent. The count stays
+with the agent through restarts, and each policy's budget counts apart:
+
+```elixir
+WardrikCore.start_agent(
+  agent_id: "books",
+  model: "anthropic:claude-haiku-4-5",
+  middleware: [{WardrikPolicy.Middleware, policy}]
+)
+```
+
+A model call that asks parks on a `WardrikPolicy.Ask`. Approve it with
+`WardrikCore.resume(agent, %{"model" => :approve})`.
+
+A dollar budget needs the model's price. A model with no price in dollars, like one a
+subscription pays for, is refused after its first call. Give the budget a `price`, or cap it in
+`tokens` instead:
+
+```elixir
+WardrikPolicy.new!(budget: [usd: 5.00, price: [input: 0.60, output: 2.20]])
 ```
 
 ## Decide a call
@@ -81,7 +127,7 @@ Without WardrikCore, pass the same as `decide/3`'s `gated:` and `subjects:` opti
   `!=`, `>`, `>=`, `<` and `<=`. A comma means all must hold.
 
 `WardrikPolicy.decode/2` reads the same rules from a map with string keys, as a YAML file writes
-them.
+them. It doesn't read a budget. Build one from your config and pass it to `new!/2`.
 
 ## Several policies
 

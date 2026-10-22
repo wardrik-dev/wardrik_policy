@@ -7,7 +7,7 @@ defmodule WardrikPolicy.MixProject do
       version: "0.1.0",
       elixir: "~> 1.20",
       description:
-        "Rules that decide every tool call an agent makes: run it, ask a person, or refuse.",
+        "Budgets that cap what an agent spends, and rules that decide every tool call it makes.",
       package: package(),
       docs: [main: "readme", extras: ["README.md"]],
       start_permanent: Mix.env() == :prod,

@@ -145,6 +145,98 @@ defmodule WardrikPolicy.MiddlewareTest do
     end
   end
 
+  describe "budgets" do
+    setup do
+      policy = WardrikPolicy.new!(budget: [usd: 1.00, tokens: 1000])
+      %{context: Context.new(middleware: [{WardrikPolicy.Middleware, policy}])}
+    end
+
+    test "counts what each model call spent", %{context: context} do
+      {:ok, context} = generate(context, usd: 0.40, tokens: 300)
+      {:ok, context} = generate(context, usd: 0.25, tokens: 100)
+
+      assert %{0 => %{usd: 0.65, tokens: 400, period: {:day, _today}}} =
+               Context.get_private(context, WardrikPolicy.Budget)
+    end
+
+    test "the call that crosses a limit runs, and the next one asks", %{context: context} do
+      {:ok, context} = generate(context, usd: 1.20)
+
+      assert {:park, %Ask{prompt: "This agent has spent $1.20 of $1.00 today." <> _rest},
+              _context} =
+               generate(context)
+    end
+
+    test "an approval allows a grant's worth more", %{context: context} do
+      {:ok, context} = generate(context, usd: 1.20)
+      {:ok, context} = generate(answered(context, %{"model" => :approve}), usd: 0.50)
+      {:ok, context} = generate(%{context | resume: nil}, usd: 0.60)
+
+      assert {:park, %Ask{prompt: "This agent has spent $2.30 of $2.20 today." <> _rest},
+              _context} =
+               generate(context)
+    end
+
+    test "a denial ends the call with its reason", %{context: context} do
+      {:ok, context} = generate(context, tokens: 1000)
+
+      assert {:error, "Not today."} =
+               generate(answered(context, %{"model" => {:deny, "Not today."}}))
+    end
+
+    test "on_exhausted: :deny refuses without asking" do
+      policy = WardrikPolicy.new!(budget: [tokens: 10, on_exhausted: :deny])
+      context = Context.new(middleware: [{WardrikPolicy.Middleware, policy}])
+      {:ok, context} = generate(context, tokens: 20)
+
+      assert {:error, "This agent has used 20 of 10 tokens today."} = generate(context)
+    end
+
+    test "a dollar budget refuses a model it can't price", %{context: context} do
+      {:ok, context} = generate(context, usd: nil, tokens: 10)
+
+      assert {:error, "This model has no price in dollars, so the budget can't hold it."} =
+               generate(context)
+    end
+
+    test "a price stands in for a cost the model doesn't report" do
+      policy = WardrikPolicy.new!(budget: [usd: 1.00, price: [input: 1.0, output: 1.0]])
+      context = Context.new(middleware: [{WardrikPolicy.Middleware, policy}])
+      {:ok, context} = generate(context, usd: nil, tokens: 500_000)
+
+      assert %{0 => %{usd: 0.5}} = Context.get_private(context, WardrikPolicy.Budget)
+    end
+
+    test "a new period starts the count over", %{context: context} do
+      context = Context.put_private(context, WardrikPolicy.Budget, %{0 => %{period: :yesterday}})
+
+      assert {:ok, context} = generate(context, usd: 0.10)
+      assert %{0 => %{usd: 0.10}} = Context.get_private(context, WardrikPolicy.Budget)
+    end
+
+    test "each policy's budget counts apart" do
+      org = WardrikPolicy.new!([budget: [usd: 100.00]], name: "acme")
+      agent = WardrikPolicy.new!([budget: [usd: 1.00, on_exhausted: :deny]], name: "books")
+      context = Context.new(middleware: [{WardrikPolicy.Middleware, [org, agent]}])
+      {:ok, context} = generate(context, usd: 2.00)
+
+      assert {:error, "This agent has spent $2.00 of $1.00 today."} = generate(context)
+      assert %{"acme" => %{usd: 2.0}} = Context.get_private(context, WardrikPolicy.Budget)
+    end
+  end
+
+  defp generate(context, spent \\ []) do
+    usage = %WardrikCore.Usage{
+      input_tokens: Keyword.get(spent, :tokens, 0),
+      usd: Keyword.get(spent, :usd, 0.0)
+    }
+
+    Context.run(context, :generate, &{:ok, %{&1 | usage: usage}})
+  end
+
+  defp answered(context, decisions),
+    do: %{context | resume: %WardrikCore.Resume{reason: %Ask{prompt: "asked"}, input: decisions}}
+
   defp run(context, name, args \\ %{}) do
     arguments = Map.new(args, fn {key, value} -> {to_string(key), value} end)
     call = %WardrikCore.ToolCall{id: "1", name: name, arguments: arguments}

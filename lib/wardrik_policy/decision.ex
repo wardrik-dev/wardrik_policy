@@ -5,7 +5,8 @@ defmodule WardrikPolicy.Decision do
   `policy` names the policy that decided, when it has a name. The cause is `:rule` when a rule
   named the call, and `rule` holds that rule. It's `:gate` when
   a gated tool asked because no rule allowed it by name. It's `:no_rule` when no rule covered the
-  whole call, so the policy's `default:` decided.
+  whole call, so the policy's `default:` decided. It's `:budget` when a model call reached the
+  policy's budget.
   """
 
   @enforce_keys [:effect, :cause]
@@ -16,6 +17,6 @@ defmodule WardrikPolicy.Decision do
           message: String.t() | nil,
           rule: String.t() | nil,
           policy: String.t() | nil,
-          cause: :rule | :gate | :no_rule
+          cause: :rule | :gate | :no_rule | :budget
         }
 end

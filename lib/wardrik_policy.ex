@@ -41,30 +41,48 @@ defmodule WardrikPolicy do
       {:deny, "email/send is not allowed for this agent."}
       iex> WardrikPolicy.decide(policy, "web_search")
       {:ask, "web_search needs your approval."}
+
+  A policy can hold a budget too, which caps what the agent spends on model calls. See
+  `WardrikPolicy.Budget`.
   """
 
+  alias WardrikPolicy.Budget
   alias WardrikPolicy.Decision
   alias WardrikPolicy.Name
   alias WardrikPolicy.Pattern
   alias WardrikPolicy.Read
   alias WardrikPolicy.Rule
 
-  defstruct name: nil, rules: [], default: :allow
+  defstruct name: nil, rules: [], default: :allow, budget: nil
 
-  @type t() :: %__MODULE__{name: String.t() | nil, rules: [Rule.t()], default: Rule.effect()}
+  @type t() :: %__MODULE__{
+          name: String.t() | nil,
+          rules: [Rule.t()],
+          default: Rule.effect(),
+          budget: Budget.t() | nil
+        }
   @type decision() :: :allow | {:ask, String.t()} | {:deny, String.t()}
 
   @effects [:allow, :ask, :deny]
   @keys ~w(allow ask deny default)
 
-  @doc "Builds a policy from a keyword list or map of rules. Raises if a rule doesn't read. Takes a `:name`."
+  @doc """
+  Builds a policy from a keyword list or map of rules, and a `budget:`. See `WardrikPolicy.Budget`.
+  Raises if a rule doesn't read. Takes a `:name`.
+  """
   @spec new!(keyword() | map(), keyword()) :: t()
   def new!(rules, opts \\ []) do
-    case rules |> Map.new(fn {key, value} -> {to_string(key), value} end) |> decode(opts) do
-      {:ok, policy} -> policy
+    {budget, rules} =
+      rules |> Map.new(fn {key, value} -> {to_string(key), value} end) |> Map.pop("budget")
+
+    case decode(rules, opts) do
+      {:ok, policy} -> %{policy | budget: budget(budget)}
       {:error, message} -> raise ArgumentError, message
     end
   end
+
+  defp budget(nil), do: nil
+  defp budget(opts), do: struct!(Budget, opts)
 
   @doc "Reads a policy from a map with string keys, like one parsed from a YAML file. Takes a `:name`."
   @spec decode(map(), keyword()) :: {:ok, t()} | {:error, String.t()}

@@ -1,19 +1,23 @@
 if Code.ensure_loaded?(WardrikCore.Middleware) do
   defmodule WardrikPolicy.Middleware do
     @moduledoc """
-    A `WardrikCore.Middleware` that runs a `WardrikPolicy` on every tool call an agent makes.
+    A `WardrikCore.Middleware` that runs a `WardrikPolicy` on every call an agent makes.
 
         middleware: [{WardrikPolicy.Middleware, WardrikPolicy.new!(deny: ["shell/*"])}]
 
     Give it a list to hold an agent to several policies at once, like an org's and its own.
 
-    The policy decides before the tool runs. A call that asks parks on a `WardrikPolicy.Ask`.
-    Answer it with `WardrikCore.resume/2`, giving each call id `:approve`, `{:approve, note}` or
+    The rules decide each tool call before it runs. A policy's budget checks each model call before
+    it runs, and counts what it spent after. What was spent stays with the agent in its context's
+    private data; see `WardrikCore.Context`.
+
+    A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/2`, giving
+    each tool call's id, or `"model"` for a model call, `:approve`, `{:approve, note}` or
     `{:deny, reason}`.
 
     Every decision emits `[:wardrik_policy, :decision]`, and every answer emits
-    `[:wardrik_policy, :answer]`. Both carry the `agent_id` and the `call`, and an answer carries
-    the `metadata` given to `WardrikCore.resume/3`, like who answered.
+    `[:wardrik_policy, :answer]`. Both carry the `agent_id` and the `call`, which is `nil` for a
+    model call. An answer carries the `metadata` given to `WardrikCore.resume/3`, like who answered.
 
     Reach for this when an agent's tools can spend money, send mail, or change anything you'd want
     a say in.
@@ -25,6 +29,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     alias WardrikCore.Tool
     alias WardrikPolicy.Ask
     alias WardrikPolicy.Decision
+    alias WardrikPolicy.Spending
 
     @unannotated %{gated: false, subjects: nil}
 
@@ -32,15 +37,45 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     def call(%Context{step: {:tool_call, call}} = context, next, policies) do
       decision = WardrikPolicy.explain(policies, call.name, decide_opts(context, call))
       emit(:decision, context, call, %{decision: decision})
+      follow(decision, context, call, next, next)
+    end
 
-      case decision do
-        %Decision{effect: :allow} -> next.(context)
-        %Decision{effect: :deny, message: message} -> {:error, message}
-        %Decision{effect: :ask, message: prompt} -> asked(context, next, call, prompt)
+    def call(%Context{step: :generate} = context, next, policies) do
+      policies = List.wrap(policies)
+      context = Spending.start(context, policies)
+      metered = &metered(&1, next, policies)
+
+      case Spending.explain(context, policies) do
+        nil ->
+          metered.(context)
+
+        decision ->
+          emit(:decision, context, nil, %{decision: decision})
+          follow(decision, context, nil, metered, &metered.(Spending.grant(&1, policies)))
       end
     end
 
     def call(context, next, _policies), do: next.(context)
+
+    defp metered(context, next, policies) do
+      with {:ok, context} <- next.(context), do: {:ok, Spending.record(context, policies)}
+    end
+
+    defp follow(%Decision{effect: :allow}, context, _call, run, _approved), do: run.(context)
+
+    defp follow(%Decision{effect: :deny, message: message}, _context, _call, _run, _approved),
+      do: {:error, message}
+
+    defp follow(%Decision{effect: :ask, message: prompt}, context, call, _run, approved) do
+      case answer(context, call) do
+        nil ->
+          {:park, %Ask{prompt: prompt}, context}
+
+        answer ->
+          emit(:answer, context, call, %{answer: answer, metadata: context.resume.metadata})
+          answered(answer, context, approved)
+      end
+    end
 
     defp decide_opts(context, call) do
       annotations = annotations(Context.tool(context, call))
@@ -58,19 +93,13 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     defp subjects(nil, _arguments), do: []
     defp subjects(subjects, arguments), do: subjects.(arguments)
 
-    defp asked(%Context{resume: %Resume{reason: %Ask{}} = resume} = context, next, call, prompt)
-         when is_map(resume.input) do
-      case Map.get(resume.input, call.id) do
-        nil ->
-          {:park, %Ask{prompt: prompt}, context}
+    defp answer(%Context{resume: %Resume{reason: %Ask{}, input: input}}, call) when is_map(input),
+      do: Map.get(input, answer_id(call))
 
-        answer ->
-          emit(:answer, context, call, %{answer: answer, metadata: resume.metadata})
-          answered(answer, context, next)
-      end
-    end
+    defp answer(_context, _call), do: nil
 
-    defp asked(context, _next, _call, prompt), do: {:park, %Ask{prompt: prompt}, context}
+    defp answer_id(nil), do: "model"
+    defp answer_id(call), do: call.id
 
     defp answered(:approve, context, next), do: next.(context)
 

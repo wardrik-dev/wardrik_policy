@@ -69,6 +69,36 @@ defmodule WardrikPolicy.AgentTest do
     assert_received {:billed, 9400}
   end
 
+  test "a model call past the budget waits for a person, across turns" do
+    used = %{input_tokens: 600, output_tokens: 600, total_cost: 0.01}
+
+    ReqLLM
+    |> expect(:stream_text, fn _, _, _ -> {:ok, %{response("Hi.") | usage: used}} end)
+    |> expect(:stream_text, fn _, _, _ -> {:ok, response("Done.")} end)
+
+    policy = WardrikPolicy.new!(budget: [tokens: 1000])
+    id = "budget-#{System.unique_integer([:positive])}"
+
+    {:ok, agent} =
+      WardrikCore.start_agent(
+        agent_id: id,
+        model: "anthropic:claude-haiku-4-5",
+        middleware: [{WardrikPolicy.Middleware, policy}]
+      )
+
+    :ok = WardrikCore.ask(agent, "Hello.")
+    assert_receive {:stopped, %{agent_id: ^id, outcome: :ok}}
+
+    :ok = WardrikCore.ask(agent, "Pay the invoice.")
+    assert_receive {:stopped, %{agent_id: ^id, outcome: :park}}
+
+    assert %Ask{prompt: "This agent has used 1,200 of 1,000 tokens today." <> _rest} =
+             WardrikCore.parked(agent)
+
+    :ok = WardrikCore.resume(agent, %{"model" => :approve})
+    assert_receive {:stopped, %{agent_id: ^id, outcome: :ok}}
+  end
+
   defp response(text) when is_binary(text), do: response(ReqLLM.Context.assistant(text))
   defp response(tool_calls: calls), do: response(ReqLLM.Context.assistant("", tool_calls: calls))
 
