@@ -99,10 +99,16 @@ defmodule WardrikPolicy.MiddlewareTest do
     end
 
     test "a person's answer is an event", %{context: context} do
-      resume(context, "books__create_bill", %{"1" => {:approve, "Pay it Friday."}})
+      resume(context, "books__create_bill", %{"1" => {:approve, "Pay it Friday."}}, %{by: "maria"})
 
       assert_receive {:decision, %{decision: %WardrikPolicy.Decision{effect: :ask}}}
-      assert_receive {:answer, %{call: %{id: "1"}, answer: {:approve, "Pay it Friday."}}}
+
+      assert_receive {:answer,
+                      %{
+                        call: %{id: "1"},
+                        answer: {:approve, "Pay it Friday."},
+                        metadata: %{by: "maria"}
+                      }}
     end
 
     test "a call left waiting has no answer", %{context: context} do
@@ -147,9 +153,14 @@ defmodule WardrikPolicy.MiddlewareTest do
     Context.run(context, {:tool_call, call}, &{:ok, %{&1 | response: {:ok, "ran"}}})
   end
 
-  defp resume(context, name, decisions) do
-    ask = %Ask{prompt: "asked"}
-    run(%{context | resume: {ask, decisions}}, name)
+  defp resume(context, name, decisions, metadata \\ %{}) do
+    resume = %WardrikCore.Resume{
+      reason: %Ask{prompt: "asked"},
+      input: decisions,
+      metadata: metadata
+    }
+
+    run(%{context | resume: resume}, name)
   end
 
   defp tool(name, annotations \\ []) do

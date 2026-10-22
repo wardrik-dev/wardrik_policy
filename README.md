@@ -53,7 +53,8 @@ WardrikCore.start_agent(
 
 A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/2`, giving each
 call id `:approve`, `{:approve, note}` or `{:deny, reason}`. A note reaches the model beside the
-call's result; a reason reaches it as the call's error.
+call's result; a reason reaches it as the call's error. To record who answered, pass it as
+`WardrikCore.resume/3`'s metadata.
 
 `WardrikPolicy.annotate/2` marks a tool `gated: true`, so its calls ask unless an allow rule names
 them, and gives it `subjects`, a function of the call's arguments, for rules like

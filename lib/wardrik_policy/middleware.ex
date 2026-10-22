@@ -13,7 +13,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     `{:deny, reason}`.
 
     Every decision emits `[:wardrik_policy, :decision]`, and every answer emits
-    `[:wardrik_policy, :answer]`. Both carry the `agent_id` and the `call`.
+    `[:wardrik_policy, :answer]`. Both carry the `agent_id` and the `call`, and an answer carries
+    the `metadata` given to `WardrikCore.resume/3`, like who answered.
 
     Reach for this when an agent's tools can spend money, send mail, or change anything you'd want
     a say in.
@@ -21,6 +22,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     @behaviour WardrikCore.Middleware
 
     alias WardrikCore.Context
+    alias WardrikCore.Resume
     alias WardrikCore.Tool
     alias WardrikPolicy.Ask
     alias WardrikPolicy.Decision
@@ -57,14 +59,14 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     defp subjects(nil, _arguments), do: []
     defp subjects(subjects, arguments), do: subjects.(arguments)
 
-    defp asked(%Context{resume: {%Ask{}, decisions}} = context, next, call, prompt)
-         when is_map(decisions) do
-      case Map.get(decisions, call.id) do
+    defp asked(%Context{resume: %Resume{reason: %Ask{}} = resume} = context, next, call, prompt)
+         when is_map(resume.input) do
+      case Map.get(resume.input, call.id) do
         nil ->
           {:park, %Ask{prompt: prompt}, context}
 
         answer ->
-          emit(:answer, context, call, %{answer: answer})
+          emit(:answer, context, call, %{answer: answer, metadata: resume.metadata})
           answered(answer, context, next)
       end
     end
