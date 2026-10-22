@@ -7,7 +7,7 @@ defmodule WardrikPolicy.MixProject do
       version: "0.1.0",
       elixir: "~> 1.20",
       description:
-        "Budgets that cap what an agent spends, and rules that decide every tool call it makes.",
+        "Budgets that cap what an agent spends, and rules and judges that decide every tool call it makes.",
       package: package(),
       docs: [main: "readme", extras: ["README.md"]],
       start_permanent: Mix.env() == :prod,
@@ -33,7 +33,8 @@ defmodule WardrikPolicy.MixProject do
   defp package do
     [
       licenses: ["Apache-2.0"],
-      files: ~w(lib mix.exs README.md LICENSE)
+      links: %{"GitHub" => "https://github.com/wardrik-dev/wardrik_policy"},
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
@@ -59,7 +60,6 @@ defmodule WardrikPolicy.MixProject do
       {:wardrik_core, path: "../wardrik_core", optional: true},
       {:telemetry, "~> 1.0", optional: true},
       {:tz, "~> 0.28"},
-      {:ekv, "~> 0.4.8", only: :test},
       {:mimic, "~> 2.4", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
