@@ -79,8 +79,28 @@ Without WardrikCore, pass the same as `decide/3`'s `gated:` and `subjects:` opti
 - **By arguments**: `books/create_bill(amount >= 1000)`, `email/send(to != *@acme.com)`, using `=`,
   `!=`, `>`, `>=`, `<` and `<=`. A comma means all must hold.
 
-`WardrikPolicy.decode/1` reads the same rules from a map with string keys, as a YAML file writes
+`WardrikPolicy.decode/2` reads the same rules from a map with string keys, as a YAML file writes
 them.
+
+## Several policies
+
+Hold an agent to an org's policy and its own by giving `decide/3` a list. Each policy's `priority`
+says which wins, lowest first:
+
+```yaml
+# acme.yaml
+priority: 0
+deny: [shell/*]
+```
+
+```yaml
+# books.yaml
+priority: 1
+allow: [shell/*, books/*]
+```
+
+The first policy with a rule for a call decides it, so `shell/exec` is refused here: the org's
+policy has the lower priority. A call neither names falls to the first policy's `default:`.
 
 ## License
 

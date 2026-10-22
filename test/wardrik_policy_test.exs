@@ -83,6 +83,62 @@ defmodule WardrikPolicyTest do
     end
   end
 
+  describe "several policies" do
+    setup do
+      org = WardrikPolicy.new!([priority: 0, ask: ["books/*"], default: :deny], name: "acme")
+
+      agent =
+        WardrikPolicy.new!([priority: 1, deny: ["books/create_bill"], allow: ["refund_order"]],
+          name: "books"
+        )
+
+      %{org: org, agent: agent}
+    end
+
+    test "the lowest priority with a rule for the call decides, in any order", %{
+      org: org,
+      agent: agent
+    } do
+      assert %WardrikPolicy.Decision{effect: :ask, policy: "acme"} =
+               WardrikPolicy.explain([agent, org], "books__create_bill")
+
+      assert %WardrikPolicy.Decision{effect: :deny, policy: "books"} =
+               WardrikPolicy.explain([agent, %{org | priority: 2}], "books__create_bill")
+    end
+
+    test "a later policy decides what an earlier one has no rule for", %{org: org, agent: agent} do
+      assert %WardrikPolicy.Decision{effect: :allow, policy: "books", cause: :rule} =
+               WardrikPolicy.explain([agent, org], "refund_order", gated: true)
+    end
+
+    test "with no rule for the call, the first policy's default decides", %{
+      org: org,
+      agent: agent
+    } do
+      assert %WardrikPolicy.Decision{effect: :deny, policy: "acme", cause: :no_rule} =
+               WardrikPolicy.explain([agent, org], "web_search")
+    end
+
+    test "equal priorities keep their list order" do
+      first = WardrikPolicy.new!([allow: ["*"]], name: "first")
+      second = WardrikPolicy.new!([deny: ["*"]], name: "second")
+
+      assert %WardrikPolicy.Decision{policy: "first"} =
+               WardrikPolicy.explain([first, second], "x")
+    end
+
+    test "reads priority from a policy file" do
+      assert {:ok, %WardrikPolicy{priority: 3}} = WardrikPolicy.decode(%{"priority" => 3})
+
+      assert {:error, "priority is a whole number, lowest first"} =
+               WardrikPolicy.decode(%{"priority" => "high"})
+    end
+
+    test "no policies allow everything" do
+      assert :allow = WardrikPolicy.decide([], "anything")
+    end
+  end
+
   describe "decide/3 on a gated tool" do
     test "asks unless an allow rule names it" do
       policy = WardrikPolicy.new!(allow: ["refund_order"])

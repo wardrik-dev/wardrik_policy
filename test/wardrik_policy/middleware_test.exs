@@ -53,6 +53,16 @@ defmodule WardrikPolicy.MiddlewareTest do
     assert {:error, _message} = run(strict, "write_file", %{path: "secrets/key"})
   end
 
+  test "takes several policies, and their priority decides", %{
+    context: context
+  } do
+    org = WardrikPolicy.new!(priority: 0, deny: %{"books/*" => "Not in this org."})
+    agent = WardrikPolicy.new!(priority: 1, ask: ["books/*"])
+    context = %{context | middleware: [{WardrikPolicy.Middleware, [agent, org]}]}
+
+    assert {:error, "Not in this org."} = run(context, "books__create_bill")
+  end
+
   test "annotate/2 rejects options it doesn't know" do
     assert_raise ArgumentError, ~r/unknown keys \[:gate\]/, fn ->
       tool("write_file", gate: true)

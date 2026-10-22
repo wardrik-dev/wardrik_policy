@@ -49,35 +49,45 @@ defmodule WardrikPolicy do
   alias WardrikPolicy.Read
   alias WardrikPolicy.Rule
 
-  defstruct rules: [], default: :allow
+  defstruct name: nil, priority: 0, rules: [], default: :allow
 
-  @type t() :: %__MODULE__{rules: [Rule.t()], default: Rule.effect()}
+  @type t() :: %__MODULE__{
+          name: String.t() | nil,
+          priority: integer(),
+          rules: [Rule.t()],
+          default: Rule.effect()
+        }
   @type decision() :: :allow | {:ask, String.t()} | {:deny, String.t()}
 
   @effects [:allow, :ask, :deny]
-  @keys ~w(allow ask deny default)
+  @keys ~w(allow ask deny default priority)
   @strictness %{deny: 2, ask: 1, allow: 0}
 
-  @doc "Builds a policy from a keyword list or map of rules. Raises if a rule doesn't read."
-  @spec new!(keyword() | map()) :: t()
-  def new!(rules) do
-    case rules |> Map.new(fn {key, value} -> {to_string(key), value} end) |> decode() do
+  @doc "Builds a policy from a keyword list or map of rules. Raises if a rule doesn't read. Takes a `:name`."
+  @spec new!(keyword() | map(), keyword()) :: t()
+  def new!(rules, opts \\ []) do
+    case rules |> Map.new(fn {key, value} -> {to_string(key), value} end) |> decode(opts) do
       {:ok, policy} -> policy
       {:error, message} -> raise ArgumentError, message
     end
   end
 
-  @doc "Reads a policy from a map with string keys, like one parsed from a YAML file."
-  @spec decode(map()) :: {:ok, t()} | {:error, String.t()}
-  def decode(fields) when is_map(fields) do
+  @doc "Reads a policy from a map with string keys, like one parsed from a YAML file. Takes a `:name`."
+  @spec decode(map(), keyword()) :: {:ok, t()} | {:error, String.t()}
+  def decode(fields, opts \\ [])
+
+  def decode(fields, opts) when is_map(fields) do
+    opts = Keyword.validate!(opts, [:name])
+
     with :ok <- known_keys(fields),
          {:ok, rules} <- rules(fields),
-         {:ok, default} <- default(Map.get(fields, "default", :allow)) do
-      {:ok, %__MODULE__{rules: rules, default: default}}
+         {:ok, default} <- default(Map.get(fields, "default", :allow)),
+         {:ok, priority} <- priority(Map.get(fields, "priority", 0)) do
+      {:ok, %__MODULE__{name: opts[:name], priority: priority, rules: rules, default: default}}
     end
   end
 
-  def decode(_fields), do: {:error, "a policy is a map of allow, ask, deny and default"}
+  def decode(_fields, _opts), do: {:error, "a policy is a map of allow, ask, deny and default"}
 
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`.
@@ -85,19 +95,33 @@ defmodule WardrikPolicy do
   Pass the call's `:arguments`, the `:subjects` it acts on, and `gated: true` for a tool that
   changes things.
   """
-  @spec decide(t(), String.t(), keyword()) :: decision()
-  def decide(%__MODULE__{} = policy, name, opts \\ []),
-    do: policy |> explain(name, opts) |> outcome()
+  @spec decide(t() | [t()], String.t(), keyword()) :: decision()
+  def decide(policies, name, opts \\ []),
+    do: policies |> explain(name, opts) |> outcome()
 
-  @doc "Like `decide/3`, but returns a `WardrikPolicy.Decision`, so you can see which rule decided."
-  @spec explain(t(), String.t(), keyword()) :: Decision.t()
-  def explain(%__MODULE__{} = policy, name, opts \\ []) do
+  @doc """
+  Like `decide/3`, but returns a `WardrikPolicy.Decision`, so you can see which rule decided.
+
+  Give it a list of policies and they're checked by `priority`, lowest first, like a list index.
+  The first one with a rule for the call decides. If none has a rule for it, the first policy's
+  `default:` decides.
+  """
+  @spec explain(t() | [t()], String.t(), keyword()) :: Decision.t()
+  def explain(policies, name, opts \\ []) do
     opts = Keyword.validate!(opts, arguments: %{}, subjects: [], gated: false)
 
-    policy
-    |> verdict(name, opts[:subjects], opts[:arguments])
+    policies
+    |> List.wrap()
+    |> Enum.sort_by(& &1.priority)
+    |> Enum.map(&verdict(&1, name, opts[:subjects], opts[:arguments]))
+    |> first_with_a_rule()
     |> gate(opts[:gated], name)
   end
+
+  defp first_with_a_rule([]), do: %Decision{effect: :allow, cause: :no_rule}
+
+  defp first_with_a_rule([first | _rest] = decisions),
+    do: Enum.find(decisions, first, fn decision -> decision.cause == :rule end)
 
   defp outcome(%Decision{effect: :allow}), do: :allow
   defp outcome(%Decision{effect: effect, message: message}), do: {effect, message}
@@ -132,7 +156,7 @@ defmodule WardrikPolicy do
     case strictest(whole ++ Enum.concat(per_subject)) do
       nil -> by_default(policy, name)
       %Rule{effect: :allow} = rule -> allowed(policy, name, rule, {whole, per_subject})
-      %Rule{} = rule -> by_rule(rule, name)
+      %Rule{} = rule -> by_rule(policy, rule, name)
     end
   end
 
@@ -147,7 +171,7 @@ defmodule WardrikPolicy do
 
   defp allowed(policy, name, rule, {whole, per_subject}) do
     if covered?(whole, per_subject),
-      do: by_rule(rule, name),
+      do: by_rule(policy, rule, name),
       else: by_default(policy, name)
   end
 
@@ -155,11 +179,12 @@ defmodule WardrikPolicy do
   defp covered?([], []), do: false
   defp covered?([], per_subject), do: Enum.all?(per_subject, &(&1 != []))
 
-  defp by_rule(%Rule{effect: effect, message: message, pattern: pattern}, name) do
+  defp by_rule(policy, %Rule{effect: effect, message: message, pattern: pattern}, name) do
     %Decision{
       effect: effect,
       message: message || default_message(effect, name),
       rule: to_string(pattern),
+      policy: policy.name,
       cause: :rule
     }
   end
@@ -168,6 +193,7 @@ defmodule WardrikPolicy do
     %Decision{
       effect: policy.default,
       message: default_message(policy.default, name),
+      policy: policy.name,
       cause: :no_rule
     }
   end
@@ -230,4 +256,7 @@ defmodule WardrikPolicy do
   defp default("ask"), do: {:ok, :ask}
   defp default("deny"), do: {:ok, :deny}
   defp default(_value), do: {:error, "default is allow, ask or deny"}
+
+  defp priority(priority) when is_integer(priority), do: {:ok, priority}
+  defp priority(_value), do: {:error, "priority is a whole number, lowest first"}
 end

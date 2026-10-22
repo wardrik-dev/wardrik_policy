@@ -5,6 +5,9 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
         middleware: [{WardrikPolicy.Middleware, WardrikPolicy.new!(deny: ["shell/*"])}]
 
+    Give it a list to hold an agent to several policies at once, like an org's and its own. Their
+    `priority` says which one wins.
+
     The policy decides before the tool runs. A call that asks parks on a `WardrikPolicy.Ask`.
     Answer it with `WardrikCore.resume/2`, giving each call id `:approve`, `{:approve, note}` or
     `{:deny, reason}`.
@@ -25,8 +28,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     @unannotated %{gated: false, subjects: nil}
 
     @impl WardrikCore.Middleware
-    def call(%Context{step: {:tool_call, call}} = context, next, %WardrikPolicy{} = policy) do
-      decision = WardrikPolicy.explain(policy, call.name, decide_opts(context, call))
+    def call(%Context{step: {:tool_call, call}} = context, next, policies) do
+      decision = WardrikPolicy.explain(policies, call.name, decide_opts(context, call))
       emit(:decision, context, call, %{decision: decision})
 
       case decision do
@@ -36,7 +39,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
       end
     end
 
-    def call(context, next, _policy), do: next.(context)
+    def call(context, next, _policies), do: next.(context)
 
     defp decide_opts(context, call) do
       annotations = annotations(Context.tool(context, call))
