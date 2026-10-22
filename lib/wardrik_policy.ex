@@ -32,9 +32,9 @@ defmodule WardrikPolicy do
       ...>     allow: ["write_file(notes/*)"],
       ...>     default: [read_only: :allow, else: :ask]
       ...>   )
-      iex> WardrikPolicy.decide(policy, "write_file", subjects: ["notes/today.md"])
+      iex> WardrikPolicy.decide(policy, "write_file", resources: ["notes/today.md"])
       :allow
-      iex> WardrikPolicy.decide(policy, "write_file", subjects: ["secrets/key"])
+      iex> WardrikPolicy.decide(policy, "write_file", resources: ["secrets/key"])
       {:ask, "write_file needs your approval."}
       iex> WardrikPolicy.decide(policy, "read_file", annotations: %{read_only: true})
       :allow
@@ -115,7 +115,7 @@ defmodule WardrikPolicy do
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`.
 
-  Pass the call's `:arguments`, the `:subjects` it acts on, and the tool's `:annotations`, like
+  Pass the call's `:arguments`, the `:resources` it acts on, and the tool's `:annotations`, like
   `%{read_only: true}`. A policy with a judge asks its model through `:evaluate`; see
   `t:WardrikPolicy.Judge.evaluate/0`.
   """
@@ -131,7 +131,7 @@ defmodule WardrikPolicy do
   """
   @spec explain(t() | [t()], String.t(), keyword()) :: Decision.t()
   def explain(policies, name, opts \\ []) do
-    opts = Keyword.validate!(opts, arguments: %{}, subjects: [], annotations: %{}, evaluate: nil)
+    opts = Keyword.validate!(opts, arguments: %{}, resources: [], annotations: %{}, evaluate: nil)
 
     policies
     |> List.wrap()
@@ -141,7 +141,7 @@ defmodule WardrikPolicy do
 
   defp verdict(policy, name, opts) do
     %{policy | default: Default.for_tool(policy, opts[:annotations])}
-    |> Rules.decide(name, opts[:subjects], opts[:arguments])
+    |> Rules.decide(name, opts[:resources], opts[:arguments])
     |> Judge.weigh(policy.judge, name, opts)
   end
 

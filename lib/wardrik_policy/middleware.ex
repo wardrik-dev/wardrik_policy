@@ -21,7 +21,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     so the model can carry on.
 
     Every decision emits `[:wardrik_policy, :decision]`, and every answer emits
-    `[:wardrik_policy, :answer]`. Both carry the `agent_id`, the step's `span`, and the `call`, which
+    `[:wardrik_policy, :answer]`, through `WardrikCore.Event`, so they reach the agent's events
+    sink as well as `:telemetry`. Both carry the `agent_id`, the step's `span`, and the `call`, which
     is `nil` for a model call. An answer carries the `metadata` given to `WardrikCore.resume/3`, like
     who answered.
 
@@ -79,6 +80,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
         answer ->
           emit(:answer, context, call, %{answer: answer, metadata: context.resume.metadata})
+
           answered(answer, context, call, approved)
       end
     end
@@ -88,7 +90,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
       [
         arguments: call.arguments,
-        subjects: subjects(annotations[:subjects], call.arguments),
+        resources: resources(annotations[:resources], call.arguments),
         annotations: annotations,
         evaluate: &evaluate(context, &1, &2, &3)
       ]
@@ -97,8 +99,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     defp annotations(nil), do: %{}
     defp annotations(%Tool{annotations: annotations}), do: annotations
 
-    defp subjects(nil, _arguments), do: []
-    defp subjects(subjects, arguments), do: subjects.(arguments)
+    defp resources(nil, _arguments), do: []
+    defp resources(resources, arguments), do: resources.(arguments)
 
     defp evaluate(context, model, state, questions) do
       named =
@@ -142,7 +144,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
       do: Context.attribute(context, "wardrik.policy.decision", decision)
 
     defp emit(event, context, call, metadata) do
-      :telemetry.execute(
+      WardrikCore.Event.emit(
+        context,
         [:wardrik_policy, event],
         %{},
         Map.merge(%{agent_id: context.agent_id, span: context.span, call: call}, metadata)

@@ -76,7 +76,7 @@ is `:allow` unless set.
 - **By tool**: `web_search`, `github/*`. An MCP server's tool `github__create_issue` matches as
   `github/create_issue` too.
 - **By what a call acts on**: `write_file(notes/*)`. Pass what it acts on as `decide/3`'s
-  `subjects:`.
+  `resources:`.
 - **By arguments**: `books/create_bill(amount >= 1000)`, `email/send(to != *@acme.com)`, using `=`,
   `!=`, `>`, `>=`, `<` and `<=`. A comma means all must hold.
 
@@ -198,7 +198,7 @@ record who answered, pass it as `WardrikCore.resume/3`'s metadata.
 A dollar budget needs the model's price. A model with no price in dollars, like one a subscription
 pays for, is refused after its first call. Give the budget a `price`, or cap it in `tokens` instead.
 
-The middleware reads each tool's annotations from `WardrikCore.Tool`. A tool's `subjects`
+The middleware reads each tool's annotations from `WardrikCore.Tool`. A tool's `resources`
 annotation says what a call acts on, as a function of its arguments:
 
 ```elixir
@@ -207,7 +207,7 @@ WardrikCore.Tool.new!(
   description: "Write a file.",
   schema: [path: [type: :string, required: true], text: [type: :string]],
   run: fn %{path: path, text: text}, _context -> {:ok, File.write!(path, text)} end,
-  annotations: [subjects: fn args -> [args["path"]] end]
+  annotations: [resources: fn args -> [args["path"]] end]
 )
 ```
 

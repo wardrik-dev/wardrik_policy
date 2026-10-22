@@ -17,7 +17,7 @@ defmodule WardrikPolicy.Rule do
     end
   end
 
-  @spec subject?(t(), String.t(), String.t()) :: boolean()
-  def subject?(%__MODULE__{pattern: pattern}, name, subject),
-    do: Pattern.match?(pattern, name, subject)
+  @spec resource?(t(), String.t(), String.t()) :: boolean()
+  def resource?(%__MODULE__{pattern: pattern}, name, resource),
+    do: Pattern.match?(pattern, name, resource)
 end

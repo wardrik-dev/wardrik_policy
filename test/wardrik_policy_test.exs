@@ -20,7 +20,7 @@ defmodule WardrikPolicyTest do
 
     test "decides each call the way the rules name it", %{policy: policy} do
       assert :allow = WardrikPolicy.decide(policy, "web_search")
-      assert :allow = WardrikPolicy.decide(policy, "write_file", subjects: ["notes/today.md"])
+      assert :allow = WardrikPolicy.decide(policy, "write_file", resources: ["notes/today.md"])
 
       assert :allow =
                WardrikPolicy.decide(policy, "books__create_bill", arguments: %{"amount" => 50})
@@ -35,11 +35,11 @@ defmodule WardrikPolicyTest do
     end
 
     test "a call no rule names follows the default", %{policy: policy} do
-      assert :allow = WardrikPolicy.decide(policy, "write_file", subjects: ["secrets/key"])
+      assert :allow = WardrikPolicy.decide(policy, "write_file", resources: ["secrets/key"])
 
       assert {:deny, "write_file is not allowed for this agent."} =
                WardrikPolicy.decide(%{policy | default: :deny}, "write_file",
-                 subjects: ["secrets/key"]
+                 resources: ["secrets/key"]
                )
     end
 
@@ -70,13 +70,13 @@ defmodule WardrikPolicyTest do
       policy = WardrikPolicy.new!(allow: ["write_file(notes/*)"], deny: ["shell/*"])
 
       assert %WardrikPolicy.Decision{effect: :allow, rule: "write_file(notes/*)", cause: :rule} =
-               WardrikPolicy.explain(policy, "write_file", subjects: ["notes/a"])
+               WardrikPolicy.explain(policy, "write_file", resources: ["notes/a"])
 
       assert %WardrikPolicy.Decision{effect: :allow, rule: nil, cause: :no_rule} =
                WardrikPolicy.explain(policy, "web_search")
 
       assert %WardrikPolicy.Decision{effect: :allow, cause: :no_rule} =
-               WardrikPolicy.explain(policy, "write_file", subjects: ["notes/a", "secrets/key"])
+               WardrikPolicy.explain(policy, "write_file", resources: ["notes/a", "secrets/key"])
     end
   end
 

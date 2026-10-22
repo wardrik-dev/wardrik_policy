@@ -32,7 +32,7 @@ defmodule WardrikPolicy.Pattern do
 
   defp with_argument(pattern, inner) do
     case Condition.parse(inner) do
-      :subject -> {:ok, %{pattern | argument: Name.glob(inner)}}
+      :resource -> {:ok, %{pattern | argument: Name.glob(inner)}}
       {:ok, conditions} -> {:ok, %{pattern | conditions: conditions}}
       {:error, message} -> {:error, "#{inspect(pattern.source)}, which #{message}"}
     end
@@ -79,10 +79,10 @@ defmodule WardrikPolicy.Pattern do
   def whole(%__MODULE__{}, _name, _arguments), do: false
 
   @spec match?(t(), String.t(), String.t()) :: boolean()
-  def match?(%__MODULE__{argument: nil}, _name, _subject), do: false
+  def match?(%__MODULE__{argument: nil}, _name, _resource), do: false
 
-  def match?(%__MODULE__{argument: argument} = pattern, name, subject),
-    do: names?(pattern, name) and Name.glob?(argument, subject)
+  def match?(%__MODULE__{argument: argument} = pattern, name, resource),
+    do: names?(pattern, name) and Name.glob?(argument, resource)
 
   defp names?(%__MODULE__{parts: parts}, name), do: Name.match?(parts, name)
 

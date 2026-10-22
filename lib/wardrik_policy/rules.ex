@@ -10,13 +10,13 @@ defmodule WardrikPolicy.Rules do
   @effects [:allow, :ask, :deny]
 
   @spec decide(WardrikPolicy.t(), String.t(), [String.t()], map()) :: Decision.t()
-  def decide(policy, name, subjects, arguments) do
+  def decide(policy, name, resources, arguments) do
     whole = Enum.filter(policy.rules, &Rule.whole?(&1, name, arguments))
-    per_subject = Enum.map(subjects, &for_subject(policy.rules, name, &1))
+    per_resource = Enum.map(resources, &for_resource(policy.rules, name, &1))
 
-    case strictest(whole ++ Enum.concat(per_subject)) do
+    case strictest(whole ++ Enum.concat(per_resource)) do
       nil -> by_default(policy, name)
-      %Rule{effect: :allow} = rule -> allowed(policy, name, rule, {whole, per_subject})
+      %Rule{effect: :allow} = rule -> allowed(policy, name, rule, {whole, per_resource})
       %Rule{} = rule -> named(policy, rule, name)
     end
   end
@@ -29,21 +29,21 @@ defmodule WardrikPolicy.Rules do
     |> Read.all()
   end
 
-  defp for_subject(rules, name, subject),
-    do: Enum.filter(rules, &Rule.subject?(&1, name, subject))
+  defp for_resource(rules, name, resource),
+    do: Enum.filter(rules, &Rule.resource?(&1, name, resource))
 
   defp strictest([]), do: nil
   defp strictest(rules), do: Enum.min_by(rules, &Decision.strictness(&1.effect))
 
-  defp allowed(policy, name, rule, {whole, per_subject}) do
-    if covered?(whole, per_subject),
+  defp allowed(policy, name, rule, {whole, per_resource}) do
+    if covered?(whole, per_resource),
       do: named(policy, rule, name),
       else: by_default(policy, name)
   end
 
-  defp covered?([_rule | _rules], _per_subject), do: true
+  defp covered?([_rule | _rules], _per_resource), do: true
   defp covered?([], []), do: false
-  defp covered?([], per_subject), do: Enum.all?(per_subject, &(&1 != []))
+  defp covered?([], per_resource), do: Enum.all?(per_resource, &(&1 != []))
 
   defp named(policy, %Rule{effect: effect, message: message, pattern: pattern}, name) do
     %Decision{

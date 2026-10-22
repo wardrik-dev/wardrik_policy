@@ -22,7 +22,7 @@ defmodule WardrikPolicy.Condition do
   @mixed "puts conditions beside what a call acts on; the parentheses hold one or the other: " <>
            "what a call acts on, as write_file(notes/*), or #{@syntax}"
 
-  @spec parse(String.t()) :: {:ok, [t()]} | :subject | {:error, String.t()}
+  @spec parse(String.t()) :: {:ok, [t()]} | :resource | {:error, String.t()}
   def parse(text) do
     text
     |> pieces()
@@ -34,7 +34,7 @@ defmodule WardrikPolicy.Condition do
 
   defp classify(read), do: read |> Enum.split_with(&is_nil/1) |> classified()
 
-  defp classified({_subjects, []}), do: :subject
+  defp classified({_resources, []}), do: :resource
   defp classified({[], conditions}), do: conditions |> Enum.map(&condition/1) |> Read.all()
   defp classified(_mixed), do: {:error, @mixed}
 

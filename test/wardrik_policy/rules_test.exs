@@ -96,13 +96,14 @@ defmodule WardrikPolicy.RulesTest do
   end
 
   describe "what a call acts on" do
-    test "an allow covers a call only where it names every subject" do
+    test "an allow covers a call only where it names every resource" do
       policy = WardrikPolicy.new!(allow: ["write_file(notes/*)"], default: :deny)
 
-      assert :allow = WardrikPolicy.decide(policy, "write_file", subjects: ["notes/a", "notes/b"])
+      assert :allow =
+               WardrikPolicy.decide(policy, "write_file", resources: ["notes/a", "notes/b"])
 
       assert {:deny, _} =
-               WardrikPolicy.decide(policy, "write_file", subjects: ["notes/a", "secrets/key"])
+               WardrikPolicy.decide(policy, "write_file", resources: ["notes/a", "secrets/key"])
 
       assert {:deny, _} = WardrikPolicy.decide(policy, "write_file")
     end

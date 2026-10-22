@@ -14,7 +14,7 @@ defmodule WardrikPolicy.MiddlewareTest do
       )
 
     tools = [
-      tool("write_file", subjects: fn args -> [args["path"]] end),
+      tool("write_file", resources: fn args -> [args["path"]] end),
       tool("refund_order"),
       tool("open_issue"),
       tool("list_issues", read_only: true),
