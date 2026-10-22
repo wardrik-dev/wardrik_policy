@@ -77,9 +77,6 @@ defmodule WardrikPolicyTest do
 
       assert %WardrikPolicy.Decision{effect: :allow, cause: :no_rule} =
                WardrikPolicy.explain(policy, "write_file", subjects: ["notes/a", "secrets/key"])
-
-      assert %WardrikPolicy.Decision{effect: :ask, cause: :gate} =
-               WardrikPolicy.explain(policy, "open_issue", gated: true)
     end
   end
 
@@ -111,12 +108,14 @@ defmodule WardrikPolicyTest do
                WardrikPolicy.explain([agent, org], "books__create_bill")
     end
 
-    test "one policy allowing a gated tool by name is enough", %{org: org, agent: agent} do
-      assert %WardrikPolicy.Decision{effect: :allow, policy: "books", cause: :rule} =
-               WardrikPolicy.explain([org, agent], "refund_order", gated: true)
+    test "an agent's own allow can't lift its org's default", %{agent: agent} do
+      org = WardrikPolicy.new!([default: [read_only: :allow, else: :ask]], name: "acme")
 
-      assert %WardrikPolicy.Decision{effect: :ask, cause: :gate} =
-               WardrikPolicy.explain([org, agent], "open_issue", gated: true)
+      assert %WardrikPolicy.Decision{effect: :ask, policy: "acme", cause: :no_rule} =
+               WardrikPolicy.explain([org, agent], "refund_order")
+
+      assert %WardrikPolicy.Decision{effect: :allow} =
+               WardrikPolicy.explain([org, agent], "list_issues", annotations: %{read_only: true})
     end
 
     test "no policies allow everything" do
@@ -124,14 +123,58 @@ defmodule WardrikPolicyTest do
     end
   end
 
-  describe "decide/3 on a gated tool" do
-    test "asks unless an allow rule names it" do
-      policy = WardrikPolicy.new!(allow: ["refund_order"])
+  describe "a default by annotation" do
+    setup do
+      policy =
+        WardrikPolicy.new!(
+          allow: ["refund_order"],
+          default: [destructive: :deny, read_only: :allow, else: :ask]
+        )
 
-      assert :allow = WardrikPolicy.decide(policy, "refund_order", gated: true)
+      %{policy: policy}
+    end
 
-      assert {:ask, "open_issue can change something."} =
-               WardrikPolicy.decide(policy, "open_issue", gated: true)
+    test "decides a call no rule names by the tool's annotations", %{policy: policy} do
+      assert :allow = WardrikPolicy.decide(policy, "list", annotations: %{read_only: true})
+      assert {:ask, _} = WardrikPolicy.decide(policy, "open_issue")
+
+      assert {:ask, _} =
+               WardrikPolicy.decide(policy, "open_issue", annotations: %{read_only: nil})
+
+      assert {:deny, _} = WardrikPolicy.decide(policy, "drop", annotations: %{destructive: true})
+    end
+
+    test "a rule that names the call still decides it", %{policy: policy} do
+      assert :allow = WardrikPolicy.decide(policy, "refund_order")
+    end
+
+    test "the strictest of the tool's annotations wins", %{policy: policy} do
+      assert {:deny, _} =
+               WardrikPolicy.decide(policy, "purge",
+                 annotations: %{read_only: true, destructive: true}
+               )
+    end
+
+    test "allows the rest unless else says" do
+      policy = WardrikPolicy.new!(default: [read_only: :allow])
+
+      assert :allow = WardrikPolicy.decide(policy, "anything")
+    end
+
+    test "reads from a file the same way" do
+      {:ok, policy} =
+        WardrikPolicy.decode(%{"default" => %{"read_only" => "allow", "else" => "ask"}})
+
+      assert :allow = WardrikPolicy.decide(policy, "list", annotations: %{read_only: true})
+      assert {:ask, _} = WardrikPolicy.decide(policy, "open_issue")
+    end
+
+    test "says what is wrong with a default it can't read" do
+      assert {:error, "default gives read_only \"sometimes\", which is not allow, ask or deny"} =
+               WardrikPolicy.decode(%{"default" => %{"read_only" => "sometimes"}})
+
+      assert {:error, "default is allow, ask or deny" <> _} =
+               WardrikPolicy.decode(%{"default" => "maybe"})
     end
   end
 

@@ -80,8 +80,29 @@ is `:allow` unless set.
 - **By arguments**: `books/create_bill(amount >= 1000)`, `email/send(to != *@acme.com)`, using `=`,
   `!=`, `>`, `>=`, `<` and `<=`. A comma means all must hold.
 
-A gated tool is one that changes things. Pass `gated: true`, and its calls ask unless an allow rule
-names them.
+## Decide what no rule names
+
+A tool says what it is with annotations, like `read_only: true`. A call no rule names follows the
+`default`, and the default can turn on those annotations:
+
+```elixir
+policy =
+  WardrikPolicy.new!(
+    allow: ["github/create_issue"],
+    default: [destructive: :deny, read_only: :allow, else: :ask]
+  )
+
+WardrikPolicy.decide(policy, "github__list_issues", annotations: %{read_only: true})
+#=> :allow
+WardrikPolicy.decide(policy, "github__close_issue")
+#=> {:ask, "github/close_issue needs your approval."}
+```
+
+`github/create_issue` runs, because a rule names it. A tool that isn't marked read-only asks, and
+one marked destructive is refused. When a tool has several annotations, the strictest wins. `else`
+covers a tool with none of them, and allows unless set.
+
+A default speaks for its own policy only. An agent's own allow can't lift its org's `else: ask`.
 
 `WardrikPolicy.decode/2` reads the same rules from a map with string keys, as a YAML file writes
 them. It doesn't read a budget or a judge. Build those from your config and pass them to `new!/2`.
@@ -177,17 +198,17 @@ record who answered, pass it as `WardrikCore.resume/3`'s metadata.
 A dollar budget needs the model's price. A model with no price in dollars, like one a subscription
 pays for, is refused after its first call. Give the budget a `price`, or cap it in `tokens` instead.
 
-`WardrikPolicy.annotate/2` tells the middleware what `decide/3`'s options would. It marks a tool
-`gated: true`, and gives it `subjects`, a function of the call's arguments:
+The middleware reads each tool's annotations from `WardrikCore.Tool`. A tool's `subjects`
+annotation says what a call acts on, as a function of its arguments:
 
 ```elixir
 WardrikCore.Tool.new!(
   name: "write_file",
   description: "Write a file.",
   schema: [path: [type: :string, required: true], text: [type: :string]],
-  run: fn %{path: path, text: text}, _context -> {:ok, File.write!(path, text)} end
+  run: fn %{path: path, text: text}, _context -> {:ok, File.write!(path, text)} end,
+  annotations: [subjects: fn args -> [args["path"]] end]
 )
-|> WardrikPolicy.annotate(gated: true, subjects: fn args -> [args["path"]] end)
 ```
 
 Every decision and every answer is a telemetry event, and each decision is set on its step's span.

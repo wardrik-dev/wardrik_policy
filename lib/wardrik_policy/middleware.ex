@@ -37,8 +37,6 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     alias WardrikPolicy.Decision
     alias WardrikPolicy.Spending
 
-    @unannotated %{gated: false, subjects: nil}
-
     @impl WardrikCore.Middleware
     def call(%Context{step: {:tool_call, call}} = context, next, policies) do
       decision = WardrikPolicy.explain(policies, call.name, decide_opts(context, call))
@@ -90,14 +88,14 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
       [
         arguments: call.arguments,
-        subjects: subjects(annotations.subjects, call.arguments),
-        gated: annotations.gated,
+        subjects: subjects(annotations[:subjects], call.arguments),
+        annotations: annotations,
         evaluate: &evaluate(context, &1, &2, &3)
       ]
     end
 
-    defp annotations(nil), do: @unannotated
-    defp annotations(tool), do: Tool.get_private(tool, WardrikPolicy, @unannotated)
+    defp annotations(nil), do: %{}
+    defp annotations(%Tool{annotations: annotations}), do: annotations
 
     defp subjects(nil, _arguments), do: []
     defp subjects(subjects, arguments), do: subjects.(arguments)

@@ -24,14 +24,20 @@ defmodule WardrikPolicy do
 
   The strictest rule wins. A deny beats an ask, and an ask beats an allow.
 
-  A rule can also name what a call acts on, like a file's path. A gated tool is one that changes
-  things, so it asks unless a rule allows it by name:
+  A rule can also name what a call acts on, like a file's path. A call no rule names follows the
+  `default`, which can turn on the tool's annotations, like `read_only`:
 
-      iex> policy = WardrikPolicy.new!(allow: ["write_file(notes/*)"])
-      iex> WardrikPolicy.decide(policy, "write_file", subjects: ["notes/today.md"], gated: true)
+      iex> policy =
+      ...>   WardrikPolicy.new!(
+      ...>     allow: ["write_file(notes/*)"],
+      ...>     default: [read_only: :allow, else: :ask]
+      ...>   )
+      iex> WardrikPolicy.decide(policy, "write_file", subjects: ["notes/today.md"])
       :allow
-      iex> WardrikPolicy.decide(policy, "write_file", subjects: ["secrets/key"], gated: true)
-      {:ask, "write_file can change something."}
+      iex> WardrikPolicy.decide(policy, "write_file", subjects: ["secrets/key"])
+      {:ask, "write_file needs your approval."}
+      iex> WardrikPolicy.decide(policy, "read_file", annotations: %{read_only: true})
+      :allow
 
   Policy files work the same way. Parse the YAML into a map first:
 
@@ -49,16 +55,17 @@ defmodule WardrikPolicy do
 
   alias WardrikPolicy.Budget
   alias WardrikPolicy.Decision
+  alias WardrikPolicy.Default
   alias WardrikPolicy.Judge
-  alias WardrikPolicy.Name
   alias WardrikPolicy.Rules
 
-  defstruct name: nil, rules: [], default: :allow, budget: nil, judge: nil
+  defstruct name: nil, rules: [], default: :allow, by_annotation: %{}, budget: nil, judge: nil
 
   @type t() :: %__MODULE__{
           name: String.t() | nil,
           rules: list(),
           default: effect(),
+          by_annotation: %{String.t() => effect()},
           budget: Budget.t() | nil,
           judge: Judge.t() | nil
         }
@@ -92,8 +99,14 @@ defmodule WardrikPolicy do
 
     with :ok <- known_keys(fields),
          {:ok, rules} <- Rules.decode(fields),
-         {:ok, default} <- default(Map.get(fields, "default", :allow)) do
-      {:ok, %__MODULE__{name: opts[:name], rules: rules, default: default}}
+         {:ok, {default, by_annotation}} <- Default.decode(Map.get(fields, "default", :allow)) do
+      {:ok,
+       %__MODULE__{
+         name: opts[:name],
+         rules: rules,
+         default: default,
+         by_annotation: by_annotation
+       }}
     end
   end
 
@@ -102,8 +115,8 @@ defmodule WardrikPolicy do
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`.
 
-  Pass the call's `:arguments`, the `:subjects` it acts on, and `gated: true` for a tool that
-  changes things. A policy with a judge asks its model through `:evaluate`; see
+  Pass the call's `:arguments`, the `:subjects` it acts on, and the tool's `:annotations`, like
+  `%{read_only: true}`. A policy with a judge asks its model through `:evaluate`; see
   `t:WardrikPolicy.Judge.evaluate/0`.
   """
   @spec decide(t() | [t()], String.t(), keyword()) :: decision()
@@ -114,48 +127,23 @@ defmodule WardrikPolicy do
   Like `decide/3`, but returns a `WardrikPolicy.Decision`, so you can see which rule decided.
 
   Give it a list of policies and the strictest decision wins. If any policy denies the call, it's
-  denied. If any asks, it asks. A gated tool asks unless one of them allows it by name.
+  denied. If any asks, it asks.
   """
   @spec explain(t() | [t()], String.t(), keyword()) :: Decision.t()
   def explain(policies, name, opts \\ []) do
-    opts = Keyword.validate!(opts, arguments: %{}, subjects: [], gated: false, evaluate: nil)
+    opts = Keyword.validate!(opts, arguments: %{}, subjects: [], annotations: %{}, evaluate: nil)
 
     policies
     |> List.wrap()
     |> Enum.map(&verdict(&1, name, opts))
     |> Decision.strictest()
-    |> gate(opts[:gated], name)
-  end
-
-  if Code.ensure_loaded?(WardrikCore.Tool) do
-    @doc """
-    Tells `WardrikPolicy.Middleware` about a tool.
-
-    Use `gated: true` for a tool that changes things. Use `subjects:` to say what a call acts on.
-    It's a function of the call's arguments, like `fn args -> [args["path"]] end`.
-    """
-    @spec annotate(WardrikCore.Tool.t(), keyword()) :: WardrikCore.Tool.t()
-    def annotate(%WardrikCore.Tool{} = tool, opts) do
-      annotations = opts |> Keyword.validate!(gated: false, subjects: nil) |> Map.new()
-      WardrikCore.Tool.put_private(tool, __MODULE__, annotations)
-    end
   end
 
   defp verdict(policy, name, opts) do
-    policy
+    %{policy | default: Default.for_tool(policy, opts[:annotations])}
     |> Rules.decide(name, opts[:subjects], opts[:arguments])
     |> Judge.weigh(policy.judge, name, opts)
   end
-
-  defp gate(%Decision{effect: :allow, cause: :no_rule} = decision, true, name),
-    do: %{
-      decision
-      | effect: :ask,
-        message: "#{Name.shown(name)} can change something.",
-        cause: :gate
-    }
-
-  defp gate(decision, _gated?, _name), do: decision
 
   defp build(_module, nil), do: nil
   defp build(module, opts), do: struct!(module, opts)
@@ -169,10 +157,4 @@ defmodule WardrikPolicy do
         {:error, "#{key} is not a setting; expected one of #{Enum.join(@keys, ", ")}"}
     end
   end
-
-  defp default(effect) when effect in [:allow, :ask, :deny], do: {:ok, effect}
-  defp default("allow"), do: {:ok, :allow}
-  defp default("ask"), do: {:ok, :ask}
-  defp default("deny"), do: {:ok, :deny}
-  defp default(_value), do: {:error, "default is allow, ask or deny"}
 end

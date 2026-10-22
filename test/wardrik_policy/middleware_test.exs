@@ -15,8 +15,9 @@ defmodule WardrikPolicy.MiddlewareTest do
 
     tools = [
       tool("write_file", subjects: fn args -> [args["path"]] end),
-      tool("refund_order", gated: true),
-      tool("open_issue", gated: true),
+      tool("refund_order"),
+      tool("open_issue"),
+      tool("list_issues", read_only: true),
       tool("books__create_bill"),
       tool("shell__exec")
     ]
@@ -40,8 +41,14 @@ defmodule WardrikPolicy.MiddlewareTest do
              run(context, "books__create_bill")
   end
 
-  test "a gated tool asks unless a rule allows it by name", %{context: context} do
-    assert {:park, %Ask{prompt: "open_issue can change something."}, _context} =
+  test "the default turns on the tool's annotations", %{context: context} do
+    policy = WardrikPolicy.new!(allow: ["refund_order"], default: [read_only: :allow, else: :ask])
+    context = %{context | middleware: [{WardrikPolicy.Middleware, policy}]}
+
+    assert {:ok, _context} = run(context, "list_issues")
+    assert {:ok, _context} = run(context, "refund_order")
+
+    assert {:park, %Ask{prompt: "open_issue needs your approval."}, _context} =
              run(context, "open_issue")
   end
 
@@ -62,12 +69,6 @@ defmodule WardrikPolicy.MiddlewareTest do
 
     assert {:ok, %Context{response: {:error, "Not in this org."}}} =
              run(context, "books__create_bill")
-  end
-
-  test "annotate/2 rejects options it doesn't know" do
-    assert_raise ArgumentError, ~r/unknown keys \[:gate\]/, fn ->
-      tool("write_file", gate: true)
-    end
   end
 
   describe "events" do
@@ -326,8 +327,8 @@ defmodule WardrikPolicy.MiddlewareTest do
     WardrikCore.Tool.new!(
       name: name,
       description: name,
-      run: fn _args, _context -> {:ok, "ran"} end
+      run: fn _args, _context -> {:ok, "ran"} end,
+      annotations: annotations
     )
-    |> WardrikPolicy.annotate(annotations)
   end
 end

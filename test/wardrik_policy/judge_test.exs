@@ -31,7 +31,7 @@ defmodule WardrikPolicy.JudgeTest do
     policy = WardrikPolicy.new!(default: :ask, judge: judge)
 
     assert %Decision{effect: :allow, cause: :judge} =
-             explain(policy, "books__list", [0.01, 0.2], gated: true)
+             explain(policy, "books__list", [0.01, 0.2])
 
     assert %Decision{effect: :ask, cause: :no_rule} = explain(policy, "books__list", [0.2, 0.2])
   end
