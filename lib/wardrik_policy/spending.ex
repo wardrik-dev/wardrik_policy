@@ -18,7 +18,7 @@ if Code.ensure_loaded?(WardrikCore.Context) do
       Context.put_private(context, Budget, current)
     end
 
-    @spec explain(Context.t(), [WardrikPolicy.t()]) :: Decision.t() | nil
+    @spec explain(Context.t(), [WardrikPolicy.t()]) :: Decision.t()
     def explain(context, policies) do
       spent = spent(context)
 
@@ -26,7 +26,7 @@ if Code.ensure_loaded?(WardrikCore.Context) do
       |> budgeted()
       |> Enum.map(fn {key, policy} -> decision(policy, spent[key]) end)
       |> Enum.reject(&is_nil/1)
-      |> strictest()
+      |> Decision.strictest()
     end
 
     @spec grant(Context.t(), [WardrikPolicy.t()]) :: Context.t()
@@ -69,11 +69,6 @@ if Code.ensure_loaded?(WardrikCore.Context) do
 
     defp exhausted(policy, {effect, message}),
       do: %Decision{effect: effect, message: message, policy: policy.name, cause: :budget}
-
-    defp strictest([]), do: nil
-
-    defp strictest(decisions),
-      do: Enum.find(decisions, List.first(decisions), &(&1.effect == :deny))
 
     defp spend(budget, spent, usage) do
       cost = Budget.cost(budget, usage)

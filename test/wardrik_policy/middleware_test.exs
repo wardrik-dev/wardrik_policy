@@ -1,5 +1,6 @@
 defmodule WardrikPolicy.MiddlewareTest do
   use ExUnit.Case, async: true
+  use Mimic
 
   alias WardrikCore.Context
   alias WardrikPolicy.Ask
@@ -142,6 +143,49 @@ defmodule WardrikPolicy.MiddlewareTest do
         put_in(context.middleware, [{WardrikPolicy.Middleware, WardrikPolicy.new!(deny: ["*"])}])
 
       assert {:error, _message} = resume(context, "books__create_bill", %{"1" => :approve})
+    end
+  end
+
+  describe "judges" do
+    setup %{context: context} do
+      policy =
+        WardrikPolicy.new!(
+          judge: [
+            model: "typesafe:jev-latest",
+            questions: [
+              [question: "Does it change the books?", tools: ["books/*"], ask: 0.5],
+              [question: "Does it send money out?", deny: 0.9]
+            ]
+          ]
+        )
+
+      %{context: put_in(context.middleware, [{WardrikPolicy.Middleware, policy}])}
+    end
+
+    test "asks the model about each call, with WardrikCore.evaluate/4", %{context: context} do
+      expect(WardrikCore, :evaluate, fn _context, "typesafe:jev-latest", state, questions ->
+        assert %{"tool" => "books/create_bill", "arguments" => %{"amount" => 9400}} = state
+
+        assert %{
+                 "q0" => %{type: :boolean, instructions: "Does it change the books?"},
+                 "q1" => %{type: :boolean, instructions: "Does it send money out?"}
+               } = questions
+
+        {:ok, %{"q0" => %{"probability" => 0.8}, "q1" => %{"probability" => 0.1}},
+         %WardrikCore.Usage{}}
+      end)
+
+      assert {:park, %Ask{prompt: "Judged 80% likely: Does it change the books?"}, _context} =
+               run(context, "books__create_bill", %{amount: 9400})
+    end
+
+    test "a judge with no usable answer asks a person", %{context: context} do
+      expect(WardrikCore, :evaluate, fn _context, _model, _state, _questions ->
+        {:ok, %{}, %WardrikCore.Usage{}}
+      end)
+
+      assert {:park, %Ask{prompt: "The judge couldn't answer (:no_answer)" <> _rest}, _context} =
+               run(context, "web_search")
     end
   end
 

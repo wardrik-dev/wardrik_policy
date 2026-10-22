@@ -127,7 +127,53 @@ Without WardrikCore, pass the same as `decide/3`'s `gated:` and `subjects:` opti
   `!=`, `>`, `>=`, `<` and `<=`. A comma means all must hold.
 
 `WardrikPolicy.decode/2` reads the same rules from a map with string keys, as a YAML file writes
-them. It doesn't read a budget. Build one from your config and pass it to `new!/2`.
+them. It doesn't read a budget or a judge. Build those from your config and pass them to `new!/2`.
+
+## Judge a call
+
+Some decisions turn on what a call means, not its name. A judge asks a model yes-or-no questions
+about each call, and decides by the probability of yes:
+
+```elixir
+policy =
+  WardrikPolicy.new!(
+    judge: [
+      questions: [
+        [
+          question: "Does this call send money outside the company?",
+          tools: ["books/*"],
+          ask: 0.5,
+          deny: 0.9
+        ]
+      ]
+    ]
+  )
+
+WardrikPolicy.decide(policy, "books__pay_bill",
+  arguments: %{"amount" => 1200},
+  evaluate: fn _model, _call, _questions -> {:ok, [0.72]} end
+)
+#=> {:ask, "Judged 72% likely: Does this call send money outside the company?"}
+```
+
+| Key | Takes | Unless set |
+| --- | --- | --- |
+| `question` | what the model is asked about the call | |
+| `tools` | the tools it's asked about, as `["books/*"]` | every tool |
+| `deny` | refuse the call at or above this probability | |
+| `ask` | ask a person first at or above this probability | |
+| `allow` | allow the call by name below this probability | |
+| `message` | what the person is asked, or the model told, in place of the question | |
+
+`evaluate:` asks the judge's `model` about the call, which is `"typesafe:jev-latest"` unless set.
+`WardrikPolicy.Middleware` passes one that calls `WardrikCore.evaluate/4`.
+
+A deny beats an ask, and an ask beats an allow, across the questions and the rules. A judge's
+allow never lifts a call a rule asks about or denies. A judge that can't answer asks a person if
+any of its questions could ask or deny.
+
+A call's arguments may be written to fool the judge. Keep exact matters in rules, and try
+a judge's thresholds on real calls before you trust its allow.
 
 ## Several policies
 

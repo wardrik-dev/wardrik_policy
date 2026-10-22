@@ -1,4 +1,5 @@
 Mimic.copy(ReqLLM)
+Mimic.copy(WardrikCore)
 Mimic.copy(ReqLLM.StreamResponse)
 
 store = Path.join(System.tmp_dir!(), "wardrik_policy_test_#{System.unique_integer([:positive])}")

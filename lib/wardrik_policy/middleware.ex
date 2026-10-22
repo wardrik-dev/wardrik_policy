@@ -7,7 +7,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
     Give it a list to hold an agent to several policies at once, like an org's and its own.
 
-    The rules decide each tool call before it runs. A policy's budget checks each model call before
+    The rules, and a policy's judge, decide each tool call before it runs. A judge asks its model with
+    `WardrikCore.evaluate/4`. A policy's budget checks each model call before
     it runs, and counts what it spent after. What was spent stays with the agent in its context's
     private data; see `WardrikCore.Context`.
 
@@ -46,7 +47,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
       metered = &metered(&1, next, policies)
 
       case Spending.explain(context, policies) do
-        nil ->
+        %Decision{effect: :allow} ->
           metered.(context)
 
         decision ->
@@ -83,7 +84,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
       [
         arguments: call.arguments,
         subjects: subjects(annotations.subjects, call.arguments),
-        gated: annotations.gated
+        gated: annotations.gated,
+        evaluate: &evaluate(context, &1, &2, &3)
       ]
     end
 
@@ -92,6 +94,25 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
     defp subjects(nil, _arguments), do: []
     defp subjects(subjects, arguments), do: subjects.(arguments)
+
+    defp evaluate(context, model, state, questions) do
+      named =
+        questions
+        |> Enum.with_index()
+        |> Map.new(fn {question, n} -> {"q#{n}", %{type: :boolean, instructions: question}} end)
+
+      with {:ok, answers, _usage} <- WardrikCore.evaluate(context, model, state, named) do
+        probabilities(answers, length(questions))
+      end
+    end
+
+    defp probabilities(answers, count) do
+      probabilities = for n <- 0..(count - 1), do: get_in(answers, ["q#{n}", "probability"])
+
+      if Enum.all?(probabilities, &is_number/1),
+        do: {:ok, probabilities},
+        else: {:error, :no_answer}
+    end
 
     defp answer(%Context{resume: %Resume{reason: %Ask{}, input: input}}, call) when is_map(input),
       do: Map.get(input, answer_id(call))

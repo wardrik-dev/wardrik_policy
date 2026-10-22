@@ -43,46 +43,45 @@ defmodule WardrikPolicy do
       {:ask, "web_search needs your approval."}
 
   A policy can hold a budget too, which caps what the agent spends on model calls. See
-  `WardrikPolicy.Budget`.
+  `WardrikPolicy.Budget`. And a judge, which asks a model about each call. See
+  `WardrikPolicy.Judge`.
   """
 
   alias WardrikPolicy.Budget
   alias WardrikPolicy.Decision
+  alias WardrikPolicy.Judge
   alias WardrikPolicy.Name
-  alias WardrikPolicy.Pattern
-  alias WardrikPolicy.Read
   alias WardrikPolicy.Rule
+  alias WardrikPolicy.Rules
 
-  defstruct name: nil, rules: [], default: :allow, budget: nil
+  defstruct name: nil, rules: [], default: :allow, budget: nil, judge: nil
 
   @type t() :: %__MODULE__{
           name: String.t() | nil,
           rules: [Rule.t()],
           default: Rule.effect(),
-          budget: Budget.t() | nil
+          budget: Budget.t() | nil,
+          judge: Judge.t() | nil
         }
   @type decision() :: :allow | {:ask, String.t()} | {:deny, String.t()}
 
-  @effects [:allow, :ask, :deny]
   @keys ~w(allow ask deny default)
 
   @doc """
-  Builds a policy from a keyword list or map of rules, and a `budget:`. See `WardrikPolicy.Budget`.
-  Raises if a rule doesn't read. Takes a `:name`.
+  Builds a policy from a keyword list or map of rules, a `budget:` and a `judge:`. See
+  `WardrikPolicy.Budget` and `WardrikPolicy.Judge`. Raises if a rule doesn't read. Takes a `:name`.
   """
   @spec new!(keyword() | map(), keyword()) :: t()
-  def new!(rules, opts \\ []) do
-    {budget, rules} =
-      rules |> Map.new(fn {key, value} -> {to_string(key), value} end) |> Map.pop("budget")
+  def new!(fields, opts \\ []) do
+    fields = Map.new(fields, fn {key, value} -> {to_string(key), value} end)
+    {budget, fields} = Map.pop(fields, "budget")
+    {judge, rules} = Map.pop(fields, "judge")
 
     case decode(rules, opts) do
-      {:ok, policy} -> %{policy | budget: budget(budget)}
+      {:ok, policy} -> %{policy | budget: build(Budget, budget), judge: build(Judge, judge)}
       {:error, message} -> raise ArgumentError, message
     end
   end
-
-  defp budget(nil), do: nil
-  defp budget(opts), do: struct!(Budget, opts)
 
   @doc "Reads a policy from a map with string keys, like one parsed from a YAML file. Takes a `:name`."
   @spec decode(map(), keyword()) :: {:ok, t()} | {:error, String.t()}
@@ -92,7 +91,7 @@ defmodule WardrikPolicy do
     opts = Keyword.validate!(opts, [:name])
 
     with :ok <- known_keys(fields),
-         {:ok, rules} <- rules(fields),
+         {:ok, rules} <- Rules.decode(fields),
          {:ok, default} <- default(Map.get(fields, "default", :allow)) do
       {:ok, %__MODULE__{name: opts[:name], rules: rules, default: default}}
     end
@@ -104,11 +103,12 @@ defmodule WardrikPolicy do
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`.
 
   Pass the call's `:arguments`, the `:subjects` it acts on, and `gated: true` for a tool that
-  changes things.
+  changes things. A policy with a judge asks its model through `:evaluate`; see
+  `t:WardrikPolicy.Judge.evaluate/0`.
   """
   @spec decide(t() | [t()], String.t(), keyword()) :: decision()
   def decide(policies, name, opts \\ []),
-    do: policies |> explain(name, opts) |> outcome()
+    do: policies |> explain(name, opts) |> Decision.outcome()
 
   @doc """
   Like `decide/3`, but returns a `WardrikPolicy.Decision`, so you can see which rule decided.
@@ -118,24 +118,14 @@ defmodule WardrikPolicy do
   """
   @spec explain(t() | [t()], String.t(), keyword()) :: Decision.t()
   def explain(policies, name, opts \\ []) do
-    opts = Keyword.validate!(opts, arguments: %{}, subjects: [], gated: false)
+    opts = Keyword.validate!(opts, arguments: %{}, subjects: [], gated: false, evaluate: nil)
 
     policies
     |> List.wrap()
-    |> Enum.map(&verdict(&1, name, opts[:subjects], opts[:arguments]))
-    |> strictest_decision()
+    |> Enum.map(&verdict(&1, name, opts))
+    |> Decision.strictest()
     |> gate(opts[:gated], name)
   end
-
-  defp strictest_decision([]), do: %Decision{effect: :allow, cause: :no_rule}
-
-  defp strictest_decision(decisions), do: Enum.min_by(decisions, &rank/1)
-
-  defp rank(decision), do: {strictness(decision.effect), by_default?(decision)}
-
-  defp by_default?(decision), do: decision.cause != :rule
-  defp outcome(%Decision{effect: :allow}), do: :allow
-  defp outcome(%Decision{effect: effect, message: message}), do: {effect, message}
 
   if Code.ensure_loaded?(WardrikCore.Tool) do
     @doc """
@@ -151,6 +141,12 @@ defmodule WardrikPolicy do
     end
   end
 
+  defp verdict(policy, name, opts) do
+    policy
+    |> Rules.decide(name, opts[:subjects], opts[:arguments])
+    |> Judge.weigh(policy.judge, name, opts)
+  end
+
   defp gate(%Decision{effect: :allow, cause: :no_rule}, true, name),
     do: %Decision{
       effect: :ask,
@@ -160,63 +156,8 @@ defmodule WardrikPolicy do
 
   defp gate(decision, _gated?, _name), do: decision
 
-  defp verdict(policy, name, subjects, arguments) do
-    whole = rules_for_call(policy.rules, name, arguments)
-    per_subject = Enum.map(subjects, &rules_for_subject(policy.rules, name, &1))
-
-    case strictest(whole ++ Enum.concat(per_subject)) do
-      nil -> by_default(policy, name)
-      %Rule{effect: :allow} = rule -> allowed(policy, name, rule, {whole, per_subject})
-      %Rule{} = rule -> by_rule(policy, rule, name)
-    end
-  end
-
-  defp rules_for_call(rules, name, arguments),
-    do: Enum.filter(rules, &Rule.whole?(&1, name, arguments))
-
-  defp rules_for_subject(rules, name, subject),
-    do: Enum.filter(rules, &Rule.subject?(&1, name, subject))
-
-  defp strictest([]), do: nil
-  defp strictest(rules), do: Enum.min_by(rules, fn rule -> strictness(rule.effect) end)
-
-  @spec strictness(Rule.effect()) :: 0..2
-  defp strictness(:deny), do: 0
-  defp strictness(:ask), do: 1
-  defp strictness(:allow), do: 2
-
-  defp allowed(policy, name, rule, {whole, per_subject}) do
-    if covered?(whole, per_subject),
-      do: by_rule(policy, rule, name),
-      else: by_default(policy, name)
-  end
-
-  defp covered?([_rule | _rules], _per_subject), do: true
-  defp covered?([], []), do: false
-  defp covered?([], per_subject), do: Enum.all?(per_subject, &(&1 != []))
-
-  defp by_rule(policy, %Rule{effect: effect, message: message, pattern: pattern}, name) do
-    %Decision{
-      effect: effect,
-      message: message || default_message(effect, name),
-      rule: to_string(pattern),
-      policy: policy.name,
-      cause: :rule
-    }
-  end
-
-  defp by_default(policy, name) do
-    %Decision{
-      effect: policy.default,
-      message: default_message(policy.default, name),
-      policy: policy.name,
-      cause: :no_rule
-    }
-  end
-
-  defp default_message(:allow, _name), do: nil
-  defp default_message(:ask, name), do: "#{Name.shown(name)} needs your approval."
-  defp default_message(:deny, name), do: "#{Name.shown(name)} is not allowed for this agent."
+  defp build(_module, nil), do: nil
+  defp build(module, opts), do: struct!(module, opts)
 
   defp known_keys(fields) do
     case Map.keys(fields) -- @keys do
@@ -228,46 +169,7 @@ defmodule WardrikPolicy do
     end
   end
 
-  defp rules(fields) do
-    @effects
-    |> Enum.flat_map(&entries(fields, &1))
-    |> Enum.map(fn {effect, entry} -> rule(effect, entry) end)
-    |> Read.all()
-  end
-
-  defp entries(fields, effect) do
-    fields
-    |> Map.get(Atom.to_string(effect), [])
-    |> listed()
-    |> Enum.map(&{effect, &1})
-  end
-
-  defp listed(patterns) when is_list(patterns), do: Enum.map(patterns, &{&1, nil})
-  defp listed(patterns) when is_map(patterns), do: Enum.to_list(patterns)
-  defp listed(other), do: [{other, :not_a_list}]
-
-  defp rule(effect, {_pattern, :not_a_list}),
-    do: {:error, "#{effect} is a list of tool patterns, or a map of pattern to message"}
-
-  defp rule(effect, {%{} = read, nil}) when map_size(read) == 1 do
-    [{before, rest}] = Map.to_list(read)
-
-    {:error,
-     "#{effect} lists #{before}: #{rest}, which YAML reads as a key and its value; a condition " <>
-       "on a value is written with =, and a rule with \": \" in it is quoted whole"}
-  end
-
-  defp rule(effect, {source, message}) when is_binary(message) or is_nil(message) do
-    case Pattern.parse(source) do
-      {:ok, pattern} -> {:ok, %Rule{effect: effect, pattern: pattern, message: message}}
-      {:error, reason} -> {:error, "#{effect} names #{reason}"}
-    end
-  end
-
-  defp rule(effect, {source, _message}),
-    do: {:error, "#{effect} gives #{source} a message that is not text"}
-
-  defp default(effect) when effect in @effects, do: {:ok, effect}
+  defp default(effect) when effect in [:allow, :ask, :deny], do: {:ok, effect}
   defp default("allow"), do: {:ok, :allow}
   defp default("ask"), do: {:ok, :ask}
   defp default("deny"), do: {:ok, :deny}
