@@ -79,6 +79,11 @@ defmodule WardrikPolicy.JudgeTest do
 
     assert {:ask, "The judge couldn't answer (:no_evaluate)" <> _rest} =
              WardrikPolicy.decide(policy, "web_search")
+
+    assert {:ask, "The judge couldn't answer (out of credits), so a person decides."} =
+             WardrikPolicy.decide(policy, "web_search",
+               evaluate: fn _, _, _ -> {:error, RuntimeError.exception("out of credits")} end
+             )
   end
 
   test "says nothing when it can't answer a question that only allows" do

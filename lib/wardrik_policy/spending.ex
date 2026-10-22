@@ -35,9 +35,21 @@ if Code.ensure_loaded?(WardrikCore.Context) do
     @spec record(Context.t(), [WardrikPolicy.t()]) :: Context.t()
     def record(context, policies) do
       gained = gained(context)
+      count(context, policies, &spend(&1, &2, gained))
+    end
 
+    @spec catch_up(Context.t(), [WardrikPolicy.t()]) :: Context.t()
+    def catch_up(context, policies) do
+      gained = gained(context)
+
+      count(context, policies, fn budget, spent ->
+        %{spend(budget, spent, gained) | unpriced: spent.unpriced}
+      end)
+    end
+
+    defp count(context, policies, spend) do
       context
-      |> update(policies, &spend(&1, &2, gained))
+      |> update(policies, spend)
       |> Context.put_private(__MODULE__, %{trace: trace(context), counted: context.measurements})
     end
 

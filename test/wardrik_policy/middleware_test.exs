@@ -246,6 +246,17 @@ defmodule WardrikPolicy.MiddlewareTest do
                generate(context)
     end
 
+    test "an unpriced tool call between model calls doesn't stop a dollar budget",
+         %{context: context} do
+      {:ok, context} = generate(context, usd: 0.10)
+      context = Context.measure(context, %{input_tokens: 300, unpriced_calls: 1})
+
+      assert {:ok, context} = generate(context, usd: 0.10)
+
+      assert %{0 => %{usd: 0.2, unpriced: false}} =
+               Context.get_private(context, WardrikPolicy.Budget)
+    end
+
     test "a price stands in for a cost the model doesn't report" do
       policy = WardrikPolicy.new!(budget: [usd: 1.00, price: [input: 1.0, output: 1.0]])
       context = metered(policy)

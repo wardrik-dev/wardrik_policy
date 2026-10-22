@@ -124,9 +124,12 @@ defmodule WardrikPolicy.Judge do
 
   defp answered(asked, {:error, reason}) do
     if Enum.any?(asked, &(Map.has_key?(&1, :deny) or Map.has_key?(&1, :ask))),
-      do: {{:ask, "The judge couldn't answer (#{inspect(reason)}), so a person decides."}, %{}},
+      do: {{:ask, "The judge couldn't answer (#{why(reason)}), so a person decides."}, %{}},
       else: {:pass, %{}}
   end
+
+  defp why(%{__exception__: true} = error), do: Exception.message(error)
+  defp why(reason), do: inspect(reason)
 
   defp verdict(answers) do
     with nil <- crossed(answers, :deny),

@@ -49,7 +49,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
     def call(%Context{step: :generate} = context, next, policies) do
       policies = List.wrap(policies)
-      context = context |> Spending.start(policies) |> Spending.record(policies)
+      context = context |> Spending.start(policies) |> Spending.catch_up(policies)
       metered = &metered(&1, next, policies)
 
       case Spending.explain(context, policies) do
