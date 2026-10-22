@@ -33,8 +33,13 @@ if Code.ensure_loaded?(WardrikCore.Context) do
     def grant(context, policies), do: update(context, policies, &Budget.grant/2)
 
     @spec record(Context.t(), [WardrikPolicy.t()]) :: Context.t()
-    def record(context, policies),
-      do: update(context, policies, &spend(&1, &2, context.usage))
+    def record(context, policies) do
+      gained = gained(context)
+
+      context
+      |> update(policies, &spend(&1, &2, gained))
+      |> Context.put_private(__MODULE__, %{trace: trace(context), counted: context.measurements})
+    end
 
     defp budgeted(policies) do
       for {%WardrikPolicy{budget: %Budget{}} = policy, index} <- Enum.with_index(policies),
@@ -70,16 +75,38 @@ if Code.ensure_loaded?(WardrikCore.Context) do
     defp exhausted(policy, {effect, message}),
       do: %Decision{effect: effect, message: message, policy: policy.name, cause: :budget}
 
-    defp spend(budget, spent, usage) do
-      cost = Budget.cost(budget, usage)
+    defp gained(context) do
+      counted = counted(Context.get_private(context, __MODULE__), trace(context))
+
+      context.measurements
+      |> Map.new(fn {key, amount} -> {key, amount - Map.get(counted, key, 0)} end)
+      |> Map.reject(fn {_key, amount} -> amount == 0 end)
+    end
+
+    defp counted(%{trace: trace, counted: counted}, trace), do: counted
+    defp counted(_counted, _trace), do: %{}
+
+    defp trace(%Context{span: nil}), do: nil
+    defp trace(%Context{span: span}), do: span.trace
+
+    defp spend(_budget, spent, gained) when map_size(gained) == 0, do: spent
+
+    defp spend(budget, spent, gained) do
+      cost = cost(budget, gained)
+      tokens = Map.get(gained, :input_tokens, 0) + Map.get(gained, :output_tokens, 0)
 
       %{
         spent
         | usd: spent.usd + (cost || 0),
-          tokens: spent.tokens + usage.input_tokens + usage.output_tokens,
-          unpriced: cost == nil
+          tokens: spent.tokens + tokens,
+          unpriced: spent.unpriced or cost == nil
       }
     end
+
+    defp cost(budget, %{unpriced_calls: _calls} = gained),
+      do: Budget.cost(budget, Map.delete(gained, :usd))
+
+    defp cost(_budget, gained), do: Map.get(gained, :usd, 0)
 
     defp update(context, policies, fun) do
       spent =

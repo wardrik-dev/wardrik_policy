@@ -42,11 +42,22 @@ defmodule WardrikPolicy.JudgeTest do
 
     evaluate = fn "typesafe:jev-latest", state, questions ->
       send(test, {:asked, state, questions})
-      {:ok, [0.1]}
+      {:ok, [0.1], %{}}
     end
 
     assert :allow = WardrikPolicy.decide(policy, "web_search", evaluate: evaluate)
     assert_received {:asked, %{"tool" => "web_search", "arguments" => %{}}, [@money]}
+  end
+
+  test "a decision carries what every judge's call used", %{judge: judge} do
+    org = WardrikPolicy.new!([judge: judge], name: "acme")
+    agent = WardrikPolicy.new!([deny: ["books/*"]], name: "books")
+
+    assert %Decision{effect: :ask, measurements: %{usd: 0.002}} =
+             explain([org, org], "books__list", [0.6, 0.1])
+
+    assert %Decision{effect: :deny, policy: "books", measurements: %{usd: 0.001}} =
+             explain([org, agent], "books__list", [0.6, 0.1])
   end
 
   test "never lifts a rule's ask or deny", %{judge: judge} do
@@ -83,6 +94,8 @@ defmodule WardrikPolicy.JudgeTest do
     do: WardrikPolicy.explain(policy, name, [evaluate: answers(probabilities)] ++ opts)
 
   defp answers(probabilities) do
-    fn _model, _state, questions -> {:ok, Enum.take(probabilities, length(questions))} end
+    fn _model, _state, questions ->
+      {:ok, Enum.take(probabilities, length(questions)), %{usd: 0.001}}
+    end
   end
 end

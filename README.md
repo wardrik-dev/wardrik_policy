@@ -151,7 +151,7 @@ policy =
 
 WardrikPolicy.decide(policy, "books__pay_bill",
   arguments: %{"amount" => 1200},
-  evaluate: fn _model, _call, _questions -> {:ok, [0.72]} end
+  evaluate: fn _model, _call, _questions -> {:ok, [0.72], %{usd: 0.0001}} end
 )
 #=> {:ask, "Judged 72% likely: Does this call send money outside the company?"}
 ```
@@ -165,7 +165,8 @@ WardrikPolicy.decide(policy, "books__pay_bill",
 | `allow` | allow the call by name below this probability | |
 | `message` | what the person is asked, or the model told, in place of the question | |
 
-`evaluate:` asks the judge's `model` about the call, which is `"typesafe:jev-latest"` unless set.
+`evaluate:` asks the judge's `model` about the call, which is `"typesafe:jev-latest"` unless set,
+and gives back what the call used. The decision carries it as `measurements`.
 `WardrikPolicy.Middleware` passes one that calls `WardrikCore.evaluate/4`.
 
 A deny beats an ask, and an ask beats an allow, across the questions and the rules. A judge's

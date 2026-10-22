@@ -16,9 +16,14 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     each tool call's id, or `"model"` for a model call, `:approve`, `{:approve, note}` or
     `{:deny, reason}`.
 
+    Each decision is set on the step as the `"wardrik.policy.decision"` attribute; see
+    `WardrikCore.Context.attribute/3`. A refused tool call is answered with the refusal as its error,
+    so the model can carry on.
+
     Every decision emits `[:wardrik_policy, :decision]`, and every answer emits
-    `[:wardrik_policy, :answer]`. Both carry the `agent_id` and the `call`, which is `nil` for a
-    model call. An answer carries the `metadata` given to `WardrikCore.resume/3`, like who answered.
+    `[:wardrik_policy, :answer]`. Both carry the `agent_id`, the step's `span`, and the `call`, which
+    is `nil` for a model call. An answer carries the `metadata` given to `WardrikCore.resume/3`, like
+    who answered.
 
     Reach for this when an agent's tools can spend money, send mail, or change anything you'd want
     a say in.
@@ -38,12 +43,13 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     def call(%Context{step: {:tool_call, call}} = context, next, policies) do
       decision = WardrikPolicy.explain(policies, call.name, decide_opts(context, call))
       emit(:decision, context, call, %{decision: decision})
+      context = context |> decided(decision) |> Context.measure(decision.measurements)
       follow(decision, context, call, next, next)
     end
 
     def call(%Context{step: :generate} = context, next, policies) do
       policies = List.wrap(policies)
-      context = Spending.start(context, policies)
+      context = context |> Spending.start(policies) |> Spending.record(policies)
       metered = &metered(&1, next, policies)
 
       case Spending.explain(context, policies) do
@@ -52,7 +58,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
         decision ->
           emit(:decision, context, nil, %{decision: decision})
-          follow(decision, context, nil, metered, &metered.(Spending.grant(&1, policies)))
+          approved = &metered.(Spending.grant(&1, policies))
+          follow(decision, decided(context, decision), nil, metered, approved)
       end
     end
 
@@ -64,8 +71,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
     defp follow(%Decision{effect: :allow}, context, _call, run, _approved), do: run.(context)
 
-    defp follow(%Decision{effect: :deny, message: message}, _context, _call, _run, _approved),
-      do: {:error, message}
+    defp follow(%Decision{effect: :deny, message: message}, context, call, _run, _approved),
+      do: refused(context, call, message)
 
     defp follow(%Decision{effect: :ask, message: prompt}, context, call, _run, approved) do
       case answer(context, call) do
@@ -74,7 +81,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
         answer ->
           emit(:answer, context, call, %{answer: answer, metadata: context.resume.metadata})
-          answered(answer, context, approved)
+          answered(answer, context, call, approved)
       end
     end
 
@@ -101,8 +108,9 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
         |> Enum.with_index()
         |> Map.new(fn {question, n} -> {"q#{n}", %{type: :boolean, instructions: question}} end)
 
-      with {:ok, answers, _usage} <- WardrikCore.evaluate(context, model, state, named) do
-        probabilities(answers, length(questions))
+      with {:ok, answers, measurements} <- WardrikCore.evaluate(context, model, state, named),
+           {:ok, probabilities} <- probabilities(answers, length(questions)) do
+        {:ok, probabilities, measurements}
       end
     end
 
@@ -122,18 +130,24 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     defp answer_id(nil), do: "model"
     defp answer_id(call), do: call.id
 
-    defp answered(:approve, context, next), do: next.(context)
+    defp answered(:approve, context, _call, next), do: next.(context)
 
-    defp answered({:approve, note}, context, next),
+    defp answered({:approve, note}, context, _call, next),
       do: with({:ok, context} <- next.(context), do: {:ok, noted(context, note)})
 
-    defp answered({:deny, reason}, _context, _next), do: {:error, reason}
+    defp answered({:deny, reason}, context, call, _next), do: refused(context, call, reason)
+
+    defp refused(_context, nil, message), do: {:error, message}
+    defp refused(context, _call, message), do: {:ok, %{context | response: {:error, message}}}
+
+    defp decided(context, decision),
+      do: Context.attribute(context, "wardrik.policy.decision", decision)
 
     defp emit(event, context, call, metadata) do
       :telemetry.execute(
         [:wardrik_policy, event],
         %{},
-        Map.merge(%{agent_id: context.agent_id, call: call}, metadata)
+        Map.merge(%{agent_id: context.agent_id, span: context.span, call: call}, metadata)
       )
     end
 

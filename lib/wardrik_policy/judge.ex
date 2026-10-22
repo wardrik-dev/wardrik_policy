@@ -16,7 +16,7 @@ defmodule WardrikPolicy.Judge do
       ...>       ]
       ...>     ]
       ...>   )
-      iex> evaluate = fn _model, _state, _questions -> {:ok, [0.72]} end
+      iex> evaluate = fn _model, _state, _questions -> {:ok, [0.72], %{}} end
       iex> WardrikPolicy.decide(policy, "books__pay_bill", evaluate: evaluate)
       {:ask, "Judged 72% likely: Does this call send money outside the company?"}
 
@@ -30,7 +30,8 @@ defmodule WardrikPolicy.Judge do
     * `message` - what the person is asked, or the model told, in place of the question.
 
   The questions a call is asked go to `model` together, with the tool's name and arguments. The
-  `evaluate:` option of `WardrikPolicy.decide/3` makes that call. `WardrikPolicy.Middleware` makes
+  `evaluate:` option of `WardrikPolicy.decide/3` makes that call, and gives back what it used. The
+  decision carries that as its `measurements`. `WardrikPolicy.Middleware` makes
   it with `WardrikCore.evaluate/4`.
 
   A deny beats an ask, and an ask beats an allow, across the questions and the rules. A judge's
@@ -59,7 +60,7 @@ defmodule WardrikPolicy.Judge do
   @typedoc "Asks `model` each question about `state`, and gives each one's probability of yes."
   @type evaluate() ::
           (model :: String.t(), state :: map(), questions :: [String.t()] ->
-             {:ok, [float()]} | {:error, term()})
+             {:ok, [float()], measurements :: map()} | {:error, term()})
 
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}`, `{:deny, message}`, or
@@ -67,10 +68,8 @@ defmodule WardrikPolicy.Judge do
   """
   @spec decide(t(), String.t(), map(), evaluate() | nil) :: WardrikPolicy.decision() | :pass
   def decide(%__MODULE__{} = judge, name, arguments, evaluate) do
-    case asked(judge, name) do
-      [] -> :pass
-      asked -> answered(asked, evaluation(judge, asked, name, arguments, evaluate))
-    end
+    {answer, _measurements} = judge(judge, name, arguments, evaluate)
+    answer
   end
 
   @doc false
@@ -79,9 +78,19 @@ defmodule WardrikPolicy.Judge do
   def weigh(decision, nil, _name, _opts), do: decision
 
   def weigh(decision, judge, name, opts) do
-    case decide(judge, name, opts[:arguments], opts[:evaluate]) do
-      :pass -> decision
-      judged -> over(decision, judged(decision.policy, judged))
+    case judge(judge, name, opts[:arguments], opts[:evaluate]) do
+      {:pass, measurements} ->
+        %{decision | measurements: measurements}
+
+      {judged, measurements} ->
+        %{over(decision, judged(decision.policy, judged)) | measurements: measurements}
+    end
+  end
+
+  defp judge(judge, name, arguments, evaluate) do
+    case asked(judge, name) do
+      [] -> {:pass, %{}}
+      asked -> answered(asked, evaluation(judge, asked, name, arguments, evaluate))
     end
   end
 
@@ -110,19 +119,20 @@ defmodule WardrikPolicy.Judge do
     evaluate.(judge.model, state, Enum.map(asked, & &1.question))
   end
 
-  defp answered(asked, {:ok, probabilities}) do
-    answers = Enum.zip(asked, probabilities)
+  defp answered(asked, {:ok, probabilities, measurements}),
+    do: {verdict(Enum.zip(asked, probabilities)), measurements}
 
+  defp answered(asked, {:error, reason}) do
+    if Enum.any?(asked, &(Map.has_key?(&1, :deny) or Map.has_key?(&1, :ask))),
+      do: {{:ask, "The judge couldn't answer (#{inspect(reason)}), so a person decides."}, %{}},
+      else: {:pass, %{}}
+  end
+
+  defp verdict(answers) do
     with nil <- crossed(answers, :deny),
          nil <- crossed(answers, :ask) do
       if allowed?(answers), do: :allow, else: :pass
     end
-  end
-
-  defp answered(asked, {:error, reason}) do
-    if Enum.any?(asked, &(Map.has_key?(&1, :deny) or Map.has_key?(&1, :ask))),
-      do: {:ask, "The judge couldn't answer (#{inspect(reason)}), so a person decides."},
-      else: :pass
   end
 
   defp crossed(answers, effect) do

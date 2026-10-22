@@ -147,11 +147,12 @@ defmodule WardrikPolicy do
     |> Judge.weigh(policy.judge, name, opts)
   end
 
-  defp gate(%Decision{effect: :allow, cause: :no_rule}, true, name),
-    do: %Decision{
-      effect: :ask,
-      message: "#{Name.shown(name)} can change something.",
-      cause: :gate
+  defp gate(%Decision{effect: :allow, cause: :no_rule} = decision, true, name),
+    do: %{
+      decision
+      | effect: :ask,
+        message: "#{Name.shown(name)} can change something.",
+        cause: :gate
     }
 
   defp gate(decision, _gated?, _name), do: decision
