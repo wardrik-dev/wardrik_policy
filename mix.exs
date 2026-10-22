@@ -9,7 +9,7 @@ defmodule WardrikPolicy.MixProject do
       description:
         "Budgets that cap what an agent spends, and rules and judges that decide every tool call it makes.",
       package: package(),
-      docs: [main: "readme", extras: ["README.md"]],
+      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       dialyzer: [

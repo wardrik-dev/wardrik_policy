@@ -24,6 +24,7 @@
       # Load and configure plugins here:
       #
       plugins: [{ExSlop, []}],
+      requires: ["credo/checks/*.ex"],
       #
       # If you want to enforce a style guide and need a more traditional linting
       # experience, you can change `strict` to `true` below:
@@ -49,6 +50,7 @@
       checks: %{
         enabled:
           [
+            {WardrikCore.Credo.Check.NoSleepyTests, files: %{included: ["test/"]}},
             #
             ## Consistency Checks
             #
