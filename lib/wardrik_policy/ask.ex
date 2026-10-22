@@ -1,5 +1,5 @@
 defmodule WardrikPolicy.Ask do
-  @moduledoc "Why a tool call waits: the question a person is asked about it."
+  @moduledoc "An ask is the question a person answers before a call can run."
 
   @enforce_keys [:prompt]
   defstruct [:prompt]

@@ -1,6 +1,6 @@
 defmodule WardrikPolicy do
   @moduledoc """
-  Rules that decide every tool call an agent makes: run it, ask a person first, or refuse it.
+  A policy decides each tool call an agent makes. It runs the call, asks a person first, or refuses it.
 
       iex> policy =
       ...>   WardrikPolicy.new!(
@@ -14,8 +14,18 @@ defmodule WardrikPolicy do
       {:ask, "A bill this size needs a person."}
       iex> WardrikPolicy.decide(policy, "shell__exec")
       {:deny, "shell/exec is not allowed for this agent."}
+      iex> WardrikPolicy.explain(policy, "shell__exec")
+      %WardrikPolicy.Decision{
+        effect: :deny,
+        message: "shell/exec is not allowed for this agent.",
+        rule: "shell/*",
+        cause: :rule
+      }
 
-  A rule can name what a call acts on, and a gated tool asks unless a rule allows it by name:
+  The strictest rule wins. A deny beats an ask, and an ask beats an allow.
+
+  A rule can also name what a call acts on, like a file's path. A gated tool is one that changes
+  things, so it asks unless a rule allows it by name:
 
       iex> policy = WardrikPolicy.new!(allow: ["write_file(notes/*)"])
       iex> WardrikPolicy.decide(policy, "write_file", subjects: ["notes/today.md"], gated: true)
@@ -23,7 +33,7 @@ defmodule WardrikPolicy do
       iex> WardrikPolicy.decide(policy, "write_file", subjects: ["secrets/key"], gated: true)
       {:ask, "write_file can change something."}
 
-  A policy file reads the same way, once parsed into a map:
+  Policy files work the same way. Parse the YAML into a map first:
 
       iex> {:ok, policy} =
       ...>   WardrikPolicy.decode(%{"deny" => ["email/send(to != *@acme.com)"], "default" => "ask"})
@@ -33,6 +43,7 @@ defmodule WardrikPolicy do
       {:ask, "web_search needs your approval."}
   """
 
+  alias WardrikPolicy.Decision
   alias WardrikPolicy.Name
   alias WardrikPolicy.Pattern
   alias WardrikPolicy.Read
@@ -47,7 +58,7 @@ defmodule WardrikPolicy do
   @keys ~w(allow ask deny default)
   @strictness %{deny: 2, ask: 1, allow: 0}
 
-  @doc "The policy `rules` write, as a keyword list or a map, raising where they write none."
+  @doc "Builds a policy from a keyword list or map of rules. Raises if a rule doesn't read."
   @spec new!(keyword() | map()) :: t()
   def new!(rules) do
     case rules |> Map.new(fn {key, value} -> {to_string(key), value} end) |> decode() do
@@ -56,7 +67,7 @@ defmodule WardrikPolicy do
     end
   end
 
-  @doc "The policy a map with string keys writes, as a file does."
+  @doc "Reads a policy from a map with string keys, like one parsed from a YAML file."
   @spec decode(map()) :: {:ok, t()} | {:error, String.t()}
   def decode(fields) when is_map(fields) do
     with :ok <- known_keys(fields),
@@ -69,23 +80,34 @@ defmodule WardrikPolicy do
   def decode(_fields), do: {:error, "a policy is a map of allow, ask, deny and default"}
 
   @doc """
-  What `policy` says about a call to the tool `name`.
+  Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`.
+
+  Pass the call's `:arguments`, the `:subjects` it acts on, and `gated: true` for a tool that
+  changes things.
   """
   @spec decide(t(), String.t(), keyword()) :: decision()
-  def decide(%__MODULE__{} = policy, name, opts \\ []) do
+  def decide(%__MODULE__{} = policy, name, opts \\ []),
+    do: policy |> explain(name, opts) |> outcome()
+
+  @doc "Like `decide/3`, but returns a `WardrikPolicy.Decision`, so you can see which rule decided."
+  @spec explain(t(), String.t(), keyword()) :: Decision.t()
+  def explain(%__MODULE__{} = policy, name, opts \\ []) do
     opts = Keyword.validate!(opts, arguments: %{}, subjects: [], gated: false)
 
-    case verdict(policy, name, opts[:subjects], opts[:arguments]) do
-      {:allow, :named} -> :allow
-      {:allow, :default} -> gate(opts[:gated], name)
-      decision -> decision
-    end
+    policy
+    |> verdict(name, opts[:subjects], opts[:arguments])
+    |> gate(opts[:gated], name)
   end
+
+  defp outcome(%Decision{effect: :allow}), do: :allow
+  defp outcome(%Decision{effect: effect, message: message}), do: {effect, message}
 
   if Code.ensure_loaded?(WardrikCore.Tool) do
     @doc """
-    Marks `tool` for `WardrikPolicy.Middleware`: `gated: true` asks unless a rule allows it by
-    name, and `subjects:`, a function of the call's arguments, names what a call acts on.
+    Tells `WardrikPolicy.Middleware` about a tool.
+
+    Use `gated: true` for a tool that changes things. Use `subjects:` to say what a call acts on.
+    It's a function of the call's arguments, like `fn args -> [args["path"]] end`.
     """
     @spec annotate(WardrikCore.Tool.t(), keyword()) :: WardrikCore.Tool.t()
     def annotate(%WardrikCore.Tool{} = tool, opts) do
@@ -94,17 +116,23 @@ defmodule WardrikPolicy do
     end
   end
 
-  defp gate(true, name), do: {:ask, "#{Name.shown(name)} can change something."}
-  defp gate(false, _name), do: :allow
+  defp gate(%Decision{effect: :allow, cause: :no_rule}, true, name),
+    do: %Decision{
+      effect: :ask,
+      message: "#{Name.shown(name)} can change something.",
+      cause: :gate
+    }
+
+  defp gate(decision, _gated?, _name), do: decision
 
   defp verdict(policy, name, subjects, arguments) do
     whole = rules_for_call(policy.rules, name, arguments)
     per_subject = Enum.map(subjects, &rules_for_subject(policy.rules, name, &1))
 
     case strictest(whole ++ Enum.concat(per_subject)) do
-      nil -> answer(policy.default, nil, name)
-      %Rule{effect: :allow} -> allowed(policy, name, whole, per_subject)
-      %Rule{effect: effect, message: message} -> answer(effect, message, name)
+      nil -> by_default(policy, name)
+      %Rule{effect: :allow} = rule -> allowed(policy, name, rule, {whole, per_subject})
+      %Rule{} = rule -> by_rule(rule, name)
     end
   end
 
@@ -117,23 +145,36 @@ defmodule WardrikPolicy do
   defp strictest([]), do: nil
   defp strictest(rules), do: Enum.max_by(rules, &Map.fetch!(@strictness, &1.effect))
 
-  defp allowed(policy, name, whole, per_subject) do
+  defp allowed(policy, name, rule, {whole, per_subject}) do
     if covered?(whole, per_subject),
-      do: {:allow, :named},
-      else: answer(policy.default, nil, name)
+      do: by_rule(rule, name),
+      else: by_default(policy, name)
   end
 
   defp covered?([_rule | _rules], _per_subject), do: true
   defp covered?([], []), do: false
   defp covered?([], per_subject), do: Enum.all?(per_subject, &(&1 != []))
 
-  defp answer(:allow, _message, _name), do: {:allow, :default}
+  defp by_rule(%Rule{effect: effect, message: message, pattern: pattern}, name) do
+    %Decision{
+      effect: effect,
+      message: message || default_message(effect, name),
+      rule: to_string(pattern),
+      cause: :rule
+    }
+  end
 
-  defp answer(:ask, message, name),
-    do: {:ask, message || "#{Name.shown(name)} needs your approval."}
+  defp by_default(policy, name) do
+    %Decision{
+      effect: policy.default,
+      message: default_message(policy.default, name),
+      cause: :no_rule
+    }
+  end
 
-  defp answer(:deny, message, name),
-    do: {:deny, message || "#{Name.shown(name)} is not allowed for this agent."}
+  defp default_message(:allow, _name), do: nil
+  defp default_message(:ask, name), do: "#{Name.shown(name)} needs your approval."
+  defp default_message(:deny, name), do: "#{Name.shown(name)} is not allowed for this agent."
 
   defp known_keys(fields) do
     case Map.keys(fields) -- @keys do

@@ -65,6 +65,24 @@ defmodule WardrikPolicyTest do
     end
   end
 
+  describe "explain/3" do
+    test "names what caused the decision" do
+      policy = WardrikPolicy.new!(allow: ["write_file(notes/*)"], deny: ["shell/*"])
+
+      assert %WardrikPolicy.Decision{effect: :allow, rule: "write_file(notes/*)", cause: :rule} =
+               WardrikPolicy.explain(policy, "write_file", subjects: ["notes/a"])
+
+      assert %WardrikPolicy.Decision{effect: :allow, rule: nil, cause: :no_rule} =
+               WardrikPolicy.explain(policy, "web_search")
+
+      assert %WardrikPolicy.Decision{effect: :allow, cause: :no_rule} =
+               WardrikPolicy.explain(policy, "write_file", subjects: ["notes/a", "secrets/key"])
+
+      assert %WardrikPolicy.Decision{effect: :ask, cause: :gate} =
+               WardrikPolicy.explain(policy, "open_issue", gated: true)
+    end
+  end
+
   describe "decide/3 on a gated tool" do
     test "asks unless an allow rule names it" do
       policy = WardrikPolicy.new!(allow: ["refund_order"])

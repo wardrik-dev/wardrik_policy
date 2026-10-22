@@ -59,6 +59,50 @@ defmodule WardrikPolicy.MiddlewareTest do
     end
   end
 
+  describe "events" do
+    setup %{context: context} do
+      agent_id = "events-#{System.unique_integer([:positive])}"
+      test = self()
+      events = [[:wardrik_policy, :decision], [:wardrik_policy, :answer]]
+
+      :telemetry.attach_many(
+        agent_id,
+        events,
+        fn [:wardrik_policy, event], _measurements, metadata, _config ->
+          if metadata.agent_id == agent_id, do: send(test, {event, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(agent_id) end)
+      %{context: %{context | agent_id: agent_id}}
+    end
+
+    test "each decision is an event, with the rule that made it", %{context: context} do
+      run(context, "shell__exec")
+
+      assert_receive {:decision,
+                      %{
+                        call: %{name: "shell__exec"},
+                        decision: %WardrikPolicy.Decision{effect: :deny, rule: "shell/*"}
+                      }}
+    end
+
+    test "a person's answer is an event", %{context: context} do
+      resume(context, "books__create_bill", %{"1" => {:approve, "Pay it Friday."}})
+
+      assert_receive {:decision, %{decision: %WardrikPolicy.Decision{effect: :ask}}}
+      assert_receive {:answer, %{call: %{id: "1"}, answer: {:approve, "Pay it Friday."}}}
+    end
+
+    test "a call left waiting has no answer", %{context: context} do
+      resume(context, "books__create_bill", %{"2" => :approve})
+
+      assert_receive {:decision, _metadata}
+      refute_receive {:answer, _metadata}
+    end
+  end
+
   describe "resuming" do
     test "an approved call runs", %{context: context} do
       assert {:ok, %Context{response: {:ok, "ran"}}} =
