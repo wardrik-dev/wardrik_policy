@@ -58,5 +58,17 @@ defmodule WardrikPolicy.BudgetTest do
       assert :total = period.(:total)
       assert :turn = period.(:turn)
     end
+
+    test "counts days where the budget's timezone says they begin" do
+      budget = %Budget{usd: 1, timezone: "Europe/Berlin"}
+
+      assert {:day, ~D[2026-10-22]} = Budget.period(budget, ~U[2026-10-21 23:30:00Z])
+    end
+
+    test "says when a timezone isn't one" do
+      assert_raise ArgumentError, "budget timezone Mars/Olympus is not a time zone", fn ->
+        Budget.period(%Budget{usd: 1, timezone: "Mars/Olympus"}, ~U[2026-10-21 23:30:00Z])
+      end
+    end
   end
 end

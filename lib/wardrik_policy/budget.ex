@@ -115,8 +115,10 @@ defmodule WardrikPolicy.Budget do
   def period(%__MODULE__{per: :total}, _now), do: :total
 
   def period(%__MODULE__{per: per, timezone: timezone}, now) do
-    {:ok, local} = DateTime.shift_zone(now, timezone)
-    {per, starts(per, DateTime.to_date(local))}
+    case DateTime.shift_zone(now, timezone, Tz.TimeZoneDatabase) do
+      {:ok, local} -> {per, starts(per, DateTime.to_date(local))}
+      {:error, _reason} -> raise ArgumentError, "budget timezone #{timezone} is not a time zone"
+    end
   end
 
   defp starts(:day, date), do: date

@@ -58,6 +58,7 @@ defmodule WardrikPolicy.MixProject do
     [
       {:wardrik_core, path: "../wardrik_core", optional: true},
       {:telemetry, "~> 1.0", optional: true},
+      {:tz, "~> 0.28"},
       {:ekv, "~> 0.4.8", only: :test},
       {:mimic, "~> 2.4", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},

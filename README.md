@@ -34,7 +34,12 @@ limit runs, and the next one asks. Approving it allows another `grant`'s worth.
 | `price` | dollars per million tokens, as `[input: 0.60, output: 2.20]` | the cost the model reports |
 | `on_exhausted` | `:ask` a person, or `:deny` and end the turn | `:ask` |
 
-A timezone other than UTC needs a time zone database, like [tz](https://hex.pm/packages/tz).
+Days, weeks and months begin at midnight UTC, and weeks begin on Monday. To count them where your
+people are, give the budget a `timezone`:
+
+```elixir
+WardrikPolicy.new!(budget: [usd: 5.00, per: :day, timezone: "Europe/Berlin"])
+```
 
 With WardrikCore, the middleware checks each model call and counts what it spent. The count stays
 with the agent through restarts, and each policy's budget counts apart:
