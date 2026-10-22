@@ -1,6 +1,7 @@
 defmodule WardrikPolicy.Default do
   @moduledoc false
 
+  alias WardrikPolicy.Call
   alias WardrikPolicy.Decision
   alias WardrikPolicy.Read
 
@@ -26,8 +27,11 @@ defmodule WardrikPolicy.Default do
     with {:ok, effect} <- effect(effect), do: {:ok, {effect, %{}}}
   end
 
-  @spec for_tool(WardrikPolicy.t(), map()) :: effect()
-  def for_tool(%WardrikPolicy{default: fallback, by_annotation: by_annotation}, annotations) do
+  @spec for_tool(WardrikPolicy.t(), Call.t()) :: effect()
+  def for_tool(
+        %WardrikPolicy{default: fallback, by_annotation: by_annotation},
+        %Call{annotations: annotations}
+      ) do
     by_annotation
     |> Map.take(held(annotations))
     |> Map.values()

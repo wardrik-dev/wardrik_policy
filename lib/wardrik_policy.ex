@@ -54,6 +54,7 @@ defmodule WardrikPolicy do
   """
 
   alias WardrikPolicy.Budget
+  alias WardrikPolicy.Call
   alias WardrikPolicy.Decision
   alias WardrikPolicy.Default
   alias WardrikPolicy.Judge
@@ -132,17 +133,18 @@ defmodule WardrikPolicy do
   @spec explain(t() | [t()], String.t(), keyword()) :: Decision.t()
   def explain(policies, name, opts \\ []) do
     opts = Keyword.validate!(opts, arguments: %{}, resources: [], annotations: %{}, evaluate: nil)
+    call = Call.new(name, opts)
 
     policies
     |> List.wrap()
-    |> Enum.map(&verdict(&1, name, opts))
+    |> Enum.map(&verdict(&1, call))
     |> Decision.strictest()
   end
 
-  defp verdict(policy, name, opts) do
-    %{policy | default: Default.for_tool(policy, opts[:annotations])}
-    |> Rules.decide(name, opts[:resources], opts[:arguments])
-    |> Judge.weigh(policy.judge, name, opts)
+  defp verdict(policy, call) do
+    %{policy | default: Default.for_tool(policy, call)}
+    |> Rules.decide(call)
+    |> Judge.weigh(policy.judge, call)
   end
 
   defp build(_module, nil), do: nil

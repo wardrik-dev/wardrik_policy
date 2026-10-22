@@ -1,6 +1,7 @@
 defmodule WardrikPolicy.Rules do
   @moduledoc false
 
+  alias WardrikPolicy.Call
   alias WardrikPolicy.Decision
   alias WardrikPolicy.Name
   alias WardrikPolicy.Pattern
@@ -9,10 +10,10 @@ defmodule WardrikPolicy.Rules do
 
   @effects [:allow, :ask, :deny]
 
-  @spec decide(WardrikPolicy.t(), String.t(), [String.t()], map()) :: Decision.t()
-  def decide(policy, name, resources, arguments) do
-    whole = Enum.filter(policy.rules, &Rule.whole?(&1, name, arguments))
-    per_resource = Enum.map(resources, &for_resource(policy.rules, name, &1))
+  @spec decide(WardrikPolicy.t(), Call.t()) :: Decision.t()
+  def decide(policy, %Call{name: name} = call) do
+    whole = Enum.filter(policy.rules, &Rule.whole?(&1, call))
+    per_resource = Enum.map(call.resources, &for_resource(policy.rules, call, &1))
 
     case strictest(whole ++ Enum.concat(per_resource)) do
       nil -> by_default(policy, name)
@@ -29,8 +30,8 @@ defmodule WardrikPolicy.Rules do
     |> Read.all()
   end
 
-  defp for_resource(rules, name, resource),
-    do: Enum.filter(rules, &Rule.resource?(&1, name, resource))
+  defp for_resource(rules, call, resource),
+    do: Enum.filter(rules, &Rule.resource?(&1, call, resource))
 
   defp strictest([]), do: nil
   defp strictest(rules), do: Enum.min_by(rules, &Decision.strictness(&1.effect))

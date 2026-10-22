@@ -42,6 +42,7 @@ defmodule WardrikPolicy.Judge do
   second opinion beside the rules, and try its thresholds on real calls before trusting them.
   """
 
+  alias WardrikPolicy.Call
   alias WardrikPolicy.Decision
   alias WardrikPolicy.Name
 
@@ -68,17 +69,19 @@ defmodule WardrikPolicy.Judge do
   """
   @spec decide(t(), String.t(), map(), evaluate() | nil) :: WardrikPolicy.decision() | :pass
   def decide(%__MODULE__{} = judge, name, arguments, evaluate) do
-    {answer, _measurements} = judge(judge, name, arguments, evaluate)
+    {answer, _measurements} =
+      judge(judge, Call.new(name, arguments: arguments, evaluate: evaluate))
+
     answer
   end
 
   @doc false
-  @spec weigh(Decision.t(), t() | nil, String.t(), keyword()) :: Decision.t()
-  def weigh(%Decision{effect: :deny} = decision, _judge, _name, _opts), do: decision
-  def weigh(decision, nil, _name, _opts), do: decision
+  @spec weigh(Decision.t(), t() | nil, Call.t()) :: Decision.t()
+  def weigh(%Decision{effect: :deny} = decision, _judge, _call), do: decision
+  def weigh(decision, nil, _call), do: decision
 
-  def weigh(decision, judge, name, opts) do
-    case judge(judge, name, opts[:arguments], opts[:evaluate]) do
+  def weigh(decision, judge, call) do
+    case judge(judge, call) do
       {:pass, measurements} ->
         %{decision | measurements: measurements}
 
@@ -87,10 +90,10 @@ defmodule WardrikPolicy.Judge do
     end
   end
 
-  defp judge(judge, name, arguments, evaluate) do
-    case asked(judge, name) do
+  defp judge(judge, call) do
+    case asked(judge, call) do
       [] -> {:pass, %{}}
-      asked -> answered(asked, evaluation(judge, asked, name, arguments, evaluate))
+      asked -> answered(asked, evaluation(judge, asked, call))
     end
   end
 
@@ -103,7 +106,7 @@ defmodule WardrikPolicy.Judge do
   defp over(decision, %Decision{effect: :allow}), do: decision
   defp over(decision, judged), do: Decision.strictest([decision, judged])
 
-  defp asked(judge, name) do
+  defp asked(judge, %Call{name: name}) do
     judge.questions
     |> Enum.map(&Map.new/1)
     |> Enum.filter(&names?(Map.get(&1, :tools, []), name))
@@ -112,11 +115,11 @@ defmodule WardrikPolicy.Judge do
   defp names?([], _name), do: true
   defp names?(tools, name), do: Enum.any?(tools, &Name.match?(Name.glob(&1), name))
 
-  defp evaluation(_judge, _asked, _name, _arguments, nil), do: {:error, :no_evaluate}
+  defp evaluation(_judge, _asked, %Call{evaluate: nil}), do: {:error, :no_evaluate}
 
-  defp evaluation(judge, asked, name, arguments, evaluate) do
-    state = %{"tool" => Name.shown(name), "arguments" => arguments}
-    evaluate.(judge.model, state, Enum.map(asked, & &1.question))
+  defp evaluation(judge, asked, %Call{} = call) do
+    state = %{"tool" => Name.shown(call.name), "arguments" => call.arguments}
+    call.evaluate.(judge.model, state, Enum.map(asked, & &1.question))
   end
 
   defp answered(asked, {:ok, probabilities, measurements}),

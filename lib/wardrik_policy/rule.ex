@@ -1,6 +1,7 @@
 defmodule WardrikPolicy.Rule do
   @moduledoc false
 
+  alias WardrikPolicy.Call
   alias WardrikPolicy.Pattern
 
   @enforce_keys [:effect, :pattern]
@@ -9,15 +10,15 @@ defmodule WardrikPolicy.Rule do
   @type effect() :: :allow | :ask | :deny
   @type t() :: %__MODULE__{effect: effect(), pattern: Pattern.t(), message: String.t() | nil}
 
-  @spec whole?(t(), String.t(), map()) :: boolean()
-  def whole?(%__MODULE__{pattern: pattern, effect: effect}, name, arguments) do
-    case Pattern.whole(pattern, name, arguments) do
+  @spec whole?(t(), Call.t()) :: boolean()
+  def whole?(%__MODULE__{pattern: pattern, effect: effect}, %Call{} = call) do
+    case Pattern.whole(pattern, call.name, call.arguments) do
       :maybe -> effect != :allow
       held -> held
     end
   end
 
-  @spec resource?(t(), String.t(), String.t()) :: boolean()
-  def resource?(%__MODULE__{pattern: pattern}, name, resource),
+  @spec resource?(t(), Call.t(), String.t()) :: boolean()
+  def resource?(%__MODULE__{pattern: pattern}, %Call{name: name}, resource),
     do: Pattern.match?(pattern, name, resource)
 end
