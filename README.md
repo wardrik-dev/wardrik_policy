@@ -85,23 +85,21 @@ them.
 
 ## Several policies
 
-Hold an agent to an org's policy and its own by giving `decide/3` a list. Each policy's `priority`
-says which wins, lowest first:
+Hold an agent to an org's policy and its own by giving `decide/3` a list. The strictest decision
+wins, so an agent's own policy can add caution but never remove it:
 
 ```yaml
-# acme.yaml
-priority: 0
+# acme.yaml, the org's
 deny: [shell/*]
 ```
 
 ```yaml
-# books.yaml
-priority: 1
+# books.yaml, the agent's
 allow: [shell/*, books/*]
 ```
 
-The first policy with a rule for a call decides it, so `shell/exec` is refused here: the org's
-policy has the lower priority. A call neither names falls to the first policy's `default:`.
+`shell/exec` is refused here, even though the agent's policy allows it. If any policy denies a call,
+it's denied. If any asks, it asks.
 
 ## License
 

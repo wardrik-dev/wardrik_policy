@@ -53,11 +53,9 @@ defmodule WardrikPolicy.MiddlewareTest do
     assert {:error, _message} = run(strict, "write_file", %{path: "secrets/key"})
   end
 
-  test "takes several policies, and their priority decides", %{
-    context: context
-  } do
-    org = WardrikPolicy.new!(priority: 0, deny: %{"books/*" => "Not in this org."})
-    agent = WardrikPolicy.new!(priority: 1, ask: ["books/*"])
+  test "takes several policies, and the strictest decision wins", %{context: context} do
+    org = WardrikPolicy.new!(deny: %{"books/*" => "Not in this org."})
+    agent = WardrikPolicy.new!(ask: ["books/*"])
     context = %{context | middleware: [{WardrikPolicy.Middleware, [agent, org]}]}
 
     assert {:error, "Not in this org."} = run(context, "books__create_bill")

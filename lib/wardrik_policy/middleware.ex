@@ -5,8 +5,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
         middleware: [{WardrikPolicy.Middleware, WardrikPolicy.new!(deny: ["shell/*"])}]
 
-    Give it a list to hold an agent to several policies at once, like an org's and its own. Their
-    `priority` says which one wins.
+    Give it a list to hold an agent to several policies at once, like an org's and its own.
 
     The policy decides before the tool runs. A call that asks parks on a `WardrikPolicy.Ask`.
     Answer it with `WardrikCore.resume/2`, giving each call id `:approve`, `{:approve, note}` or

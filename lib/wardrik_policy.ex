@@ -49,19 +49,13 @@ defmodule WardrikPolicy do
   alias WardrikPolicy.Read
   alias WardrikPolicy.Rule
 
-  defstruct name: nil, priority: 0, rules: [], default: :allow
+  defstruct name: nil, rules: [], default: :allow
 
-  @type t() :: %__MODULE__{
-          name: String.t() | nil,
-          priority: integer(),
-          rules: [Rule.t()],
-          default: Rule.effect()
-        }
+  @type t() :: %__MODULE__{name: String.t() | nil, rules: [Rule.t()], default: Rule.effect()}
   @type decision() :: :allow | {:ask, String.t()} | {:deny, String.t()}
 
   @effects [:allow, :ask, :deny]
-  @keys ~w(allow ask deny default priority)
-  @strictness %{deny: 2, ask: 1, allow: 0}
+  @keys ~w(allow ask deny default)
 
   @doc "Builds a policy from a keyword list or map of rules. Raises if a rule doesn't read. Takes a `:name`."
   @spec new!(keyword() | map(), keyword()) :: t()
@@ -81,9 +75,8 @@ defmodule WardrikPolicy do
 
     with :ok <- known_keys(fields),
          {:ok, rules} <- rules(fields),
-         {:ok, default} <- default(Map.get(fields, "default", :allow)),
-         {:ok, priority} <- priority(Map.get(fields, "priority", 0)) do
-      {:ok, %__MODULE__{name: opts[:name], priority: priority, rules: rules, default: default}}
+         {:ok, default} <- default(Map.get(fields, "default", :allow)) do
+      {:ok, %__MODULE__{name: opts[:name], rules: rules, default: default}}
     end
   end
 
@@ -102,9 +95,8 @@ defmodule WardrikPolicy do
   @doc """
   Like `decide/3`, but returns a `WardrikPolicy.Decision`, so you can see which rule decided.
 
-  Give it a list of policies and they're checked by `priority`, lowest first, like a list index.
-  The first one with a rule for the call decides. If none has a rule for it, the first policy's
-  `default:` decides.
+  Give it a list of policies and the strictest decision wins. If any policy denies the call, it's
+  denied. If any asks, it asks. A gated tool asks unless one of them allows it by name.
   """
   @spec explain(t() | [t()], String.t(), keyword()) :: Decision.t()
   def explain(policies, name, opts \\ []) do
@@ -112,17 +104,18 @@ defmodule WardrikPolicy do
 
     policies
     |> List.wrap()
-    |> Enum.sort_by(& &1.priority)
     |> Enum.map(&verdict(&1, name, opts[:subjects], opts[:arguments]))
-    |> first_with_a_rule()
+    |> strictest_decision()
     |> gate(opts[:gated], name)
   end
 
-  defp first_with_a_rule([]), do: %Decision{effect: :allow, cause: :no_rule}
+  defp strictest_decision([]), do: %Decision{effect: :allow, cause: :no_rule}
 
-  defp first_with_a_rule([first | _rest] = decisions),
-    do: Enum.find(decisions, first, fn decision -> decision.cause == :rule end)
+  defp strictest_decision(decisions), do: Enum.min_by(decisions, &rank/1)
 
+  defp rank(decision), do: {strictness(decision.effect), by_default?(decision)}
+
+  defp by_default?(decision), do: decision.cause != :rule
   defp outcome(%Decision{effect: :allow}), do: :allow
   defp outcome(%Decision{effect: effect, message: message}), do: {effect, message}
 
@@ -167,7 +160,12 @@ defmodule WardrikPolicy do
     do: Enum.filter(rules, &Rule.subject?(&1, name, subject))
 
   defp strictest([]), do: nil
-  defp strictest(rules), do: Enum.max_by(rules, &Map.fetch!(@strictness, &1.effect))
+  defp strictest(rules), do: Enum.min_by(rules, fn rule -> strictness(rule.effect) end)
+
+  @spec strictness(Rule.effect()) :: 0..2
+  defp strictness(:deny), do: 0
+  defp strictness(:ask), do: 1
+  defp strictness(:allow), do: 2
 
   defp allowed(policy, name, rule, {whole, per_subject}) do
     if covered?(whole, per_subject),
@@ -256,7 +254,4 @@ defmodule WardrikPolicy do
   defp default("ask"), do: {:ok, :ask}
   defp default("deny"), do: {:ok, :deny}
   defp default(_value), do: {:error, "default is allow, ask or deny"}
-
-  defp priority(priority) when is_integer(priority), do: {:ok, priority}
-  defp priority(_value), do: {:error, "priority is a whole number, lowest first"}
 end

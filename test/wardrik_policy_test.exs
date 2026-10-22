@@ -85,53 +85,38 @@ defmodule WardrikPolicyTest do
 
   describe "several policies" do
     setup do
-      org = WardrikPolicy.new!([priority: 0, ask: ["books/*"], default: :deny], name: "acme")
+      org =
+        WardrikPolicy.new!([allow: ["stripe/*"], ask: ["books/*"], deny: ["shell/*"]],
+          name: "acme"
+        )
 
       agent =
-        WardrikPolicy.new!([priority: 1, deny: ["books/create_bill"], allow: ["refund_order"]],
+        WardrikPolicy.new!([deny: ["stripe/refund"], allow: ["shell/*", "refund_order"]],
           name: "books"
         )
 
       %{org: org, agent: agent}
     end
 
-    test "the lowest priority with a rule for the call decides, in any order", %{
-      org: org,
-      agent: agent
-    } do
+    test "any deny wins, so an agent's own policy can narrow its org's", %{org: org, agent: agent} do
+      assert %WardrikPolicy.Decision{effect: :deny, policy: "books"} =
+               WardrikPolicy.explain([org, agent], "stripe__refund")
+    end
+
+    test "an agent's own allow can't widen its org's", %{org: org, agent: agent} do
+      assert %WardrikPolicy.Decision{effect: :deny, policy: "acme"} =
+               WardrikPolicy.explain([org, agent], "shell__exec")
+
       assert %WardrikPolicy.Decision{effect: :ask, policy: "acme"} =
                WardrikPolicy.explain([agent, org], "books__create_bill")
-
-      assert %WardrikPolicy.Decision{effect: :deny, policy: "books"} =
-               WardrikPolicy.explain([agent, %{org | priority: 2}], "books__create_bill")
     end
 
-    test "a later policy decides what an earlier one has no rule for", %{org: org, agent: agent} do
+    test "one policy allowing a gated tool by name is enough", %{org: org, agent: agent} do
       assert %WardrikPolicy.Decision{effect: :allow, policy: "books", cause: :rule} =
-               WardrikPolicy.explain([agent, org], "refund_order", gated: true)
-    end
+               WardrikPolicy.explain([org, agent], "refund_order", gated: true)
 
-    test "with no rule for the call, the first policy's default decides", %{
-      org: org,
-      agent: agent
-    } do
-      assert %WardrikPolicy.Decision{effect: :deny, policy: "acme", cause: :no_rule} =
-               WardrikPolicy.explain([agent, org], "web_search")
-    end
-
-    test "equal priorities keep their list order" do
-      first = WardrikPolicy.new!([allow: ["*"]], name: "first")
-      second = WardrikPolicy.new!([deny: ["*"]], name: "second")
-
-      assert %WardrikPolicy.Decision{policy: "first"} =
-               WardrikPolicy.explain([first, second], "x")
-    end
-
-    test "reads priority from a policy file" do
-      assert {:ok, %WardrikPolicy{priority: 3}} = WardrikPolicy.decode(%{"priority" => 3})
-
-      assert {:error, "priority is a whole number, lowest first"} =
-               WardrikPolicy.decode(%{"priority" => "high"})
+      assert %WardrikPolicy.Decision{effect: :ask, cause: :gate} =
+               WardrikPolicy.explain([org, agent], "open_issue", gated: true)
     end
 
     test "no policies allow everything" do
