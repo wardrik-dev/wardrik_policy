@@ -28,6 +28,8 @@ defmodule WardrikPolicy.Budget do
   Start it over when `period/2` changes.
   """
 
+  alias WardrikPolicy.Read
+
   defstruct usd: nil,
             tokens: nil,
             per: :day,
@@ -65,6 +67,40 @@ defmodule WardrikPolicy.Budget do
   @type period() :: :turn | :total | {:day | :week | :month, Date.t()}
 
   @kinds [:usd, :tokens]
+  @fields ~w(usd tokens per timezone grant price on_exhausted)
+  @periods %{
+    "turn" => :turn,
+    "day" => :day,
+    "week" => :week,
+    "month" => :month,
+    "total" => :total
+  }
+  @exhausted %{"ask" => :ask, "deny" => :deny}
+  @amounts %{"usd" => :usd, "tokens" => :tokens}
+  @prices %{"input" => :input, "output" => :output}
+
+  @doc "Reads a budget from a map with string keys, as a YAML file writes it."
+  @spec decode(map()) :: {:ok, t()} | {:error, String.t()}
+  def decode(fields) when is_map(fields) do
+    with :ok <- Read.known(fields, @fields, "a budget"),
+         {:ok, per} <- Read.choice(fields, "per", @periods, :day),
+         {:ok, on_exhausted} <- Read.choice(fields, "on_exhausted", @exhausted, :ask),
+         {:ok, grant} <- Read.keywords(fields["grant"], @amounts, "grant"),
+         {:ok, price} <- Read.keywords(fields["price"], @prices, "price") do
+      {:ok,
+       %__MODULE__{
+         usd: fields["usd"],
+         tokens: fields["tokens"],
+         per: per,
+         timezone: Map.get(fields, "timezone", "Etc/UTC"),
+         grant: grant || [],
+         price: price,
+         on_exhausted: on_exhausted
+       }}
+    end
+  end
+
+  def decode(_fields), do: {:error, "a budget is a map of #{Enum.join(@fields, ", ")}"}
 
   @doc """
   Checks what was spent against the budget. Returns `:allow`, `{:ask, prompt}` or

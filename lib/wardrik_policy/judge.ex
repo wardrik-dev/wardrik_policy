@@ -46,7 +46,19 @@ defmodule WardrikPolicy.Judge do
   alias WardrikPolicy.Decision
   alias WardrikPolicy.Name
 
+  alias WardrikPolicy.Read
+
   defstruct model: "typesafe:jev-latest", questions: []
+
+  @fields ~w(model questions)
+  @question %{
+    "question" => :question,
+    "tools" => :tools,
+    "deny" => :deny,
+    "ask" => :ask,
+    "allow" => :allow,
+    "message" => :message
+  }
 
   @type question() :: %{
           required(:question) => String.t(),
@@ -62,6 +74,33 @@ defmodule WardrikPolicy.Judge do
   @type evaluate() ::
           (model :: String.t(), state :: map(), questions :: [String.t()] ->
              {:ok, [float()], measurements :: map()} | {:error, term()})
+
+  @doc "Reads a judge from a map with string keys, as a YAML file writes it."
+  @spec decode(map()) :: {:ok, t()} | {:error, String.t()}
+  def decode(fields) when is_map(fields) do
+    with :ok <- Read.known(fields, @fields, "a judge"),
+         {:ok, questions} <- questions(Map.get(fields, "questions", [])) do
+      {:ok,
+       %__MODULE__{model: Map.get(fields, "model", %__MODULE__{}.model), questions: questions}}
+    end
+  end
+
+  def decode(_fields), do: {:error, "a judge is a map of model and questions"}
+
+  defp questions(questions) when is_list(questions) do
+    questions
+    |> Enum.map(&question/1)
+    |> Read.all()
+  end
+
+  defp questions(_questions), do: {:error, "a judge's questions are a list"}
+
+  defp question(%{"question" => _question} = fields) do
+    with {:ok, question} <- Read.keywords(fields, @question, "a question"),
+         do: {:ok, Map.new(question)}
+  end
+
+  defp question(_fields), do: {:error, "each of a judge's questions has a question"}
 
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}`, `{:deny, message}`, or

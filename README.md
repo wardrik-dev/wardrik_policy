@@ -104,8 +104,8 @@ covers a tool with none of them, and allows unless set.
 
 A default speaks for its own policy only. An agent's own allow can't lift its org's `else: ask`.
 
-`WardrikPolicy.decode/2` reads the same rules from a map with string keys, as a YAML file writes
-them. It doesn't read a budget or a judge. Build those from your config and pass them to `new!/2`.
+`WardrikPolicy.decode/2` reads the same policy from a map with string keys, as a YAML file writes
+it, its `budget` and `judge` included.
 
 ## Judge a call
 

@@ -73,7 +73,7 @@ defmodule WardrikPolicy do
   @type effect() :: :allow | :ask | :deny
   @type decision() :: :allow | {:ask, String.t()} | {:deny, String.t()}
 
-  @keys ~w(allow ask deny default)
+  @keys ~w(allow ask deny default budget judge)
 
   @doc """
   Builds a policy from a keyword list or map of rules, a `budget:` and a `judge:`. See
@@ -100,13 +100,17 @@ defmodule WardrikPolicy do
 
     with :ok <- known_keys(fields),
          {:ok, rules} <- Rules.decode(fields),
-         {:ok, {default, by_annotation}} <- Default.decode(Map.get(fields, "default", :allow)) do
+         {:ok, {default, by_annotation}} <- Default.decode(Map.get(fields, "default", :allow)),
+         {:ok, budget} <- decoded(Budget, fields["budget"]),
+         {:ok, judge} <- decoded(Judge, fields["judge"]) do
       {:ok,
        %__MODULE__{
          name: opts[:name],
          rules: rules,
          default: default,
-         by_annotation: by_annotation
+         by_annotation: by_annotation,
+         budget: budget,
+         judge: judge
        }}
     end
   end
@@ -146,6 +150,9 @@ defmodule WardrikPolicy do
     |> Rules.decide(call)
     |> Judge.weigh(policy.judge, call)
   end
+
+  defp decoded(_module, nil), do: {:ok, nil}
+  defp decoded(module, fields), do: module.decode(fields)
 
   defp build(_module, nil), do: nil
   defp build(module, opts), do: struct!(module, opts)

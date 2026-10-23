@@ -178,6 +178,65 @@ defmodule WardrikPolicyTest do
     end
   end
 
+  describe "decode/2" do
+    test "reads a budget and a judge as a file writes them" do
+      fields = %{
+        "ask" => ["github/*"],
+        "budget" => %{
+          "tokens" => 400_000,
+          "per" => "day",
+          "timezone" => "America/Los_Angeles",
+          "grant" => %{"tokens" => 200_000},
+          "price" => %{"input" => 0.6, "output" => 2.2},
+          "on_exhausted" => "deny"
+        },
+        "judge" => %{
+          "model" => "anthropic:claude-haiku-4-5",
+          "questions" => [
+            %{"question" => "Does it send money?", "tools" => ["books/*"], "ask" => 0.5}
+          ]
+        }
+      }
+
+      assert {:ok, %WardrikPolicy{budget: budget, judge: judge}} = WardrikPolicy.decode(fields)
+
+      assert %WardrikPolicy.Budget{
+               tokens: 400_000,
+               per: :day,
+               timezone: "America/Los_Angeles",
+               grant: [tokens: 200_000],
+               price: [input: 0.6, output: 2.2],
+               on_exhausted: :deny
+             } = budget
+
+      assert %WardrikPolicy.Judge{
+               model: "anthropic:claude-haiku-4-5",
+               questions: [%{question: "Does it send money?", tools: ["books/*"], ask: 0.5}]
+             } = judge
+    end
+
+    test "says what is wrong with a budget or a judge it can't read" do
+      assert {:error, "per is one of" <> _} =
+               WardrikPolicy.decode(%{"budget" => %{"usd" => 5, "per" => "fortnight"}})
+
+      assert {:error, "cap is not a setting of a budget" <> _} =
+               WardrikPolicy.decode(%{"budget" => %{"cap" => 5}})
+
+      assert {:error, "grant is a map of" <> _} =
+               WardrikPolicy.decode(%{"budget" => %{"usd" => 5, "grant" => 2}})
+
+      assert {:error, "a budget is a map" <> _} = WardrikPolicy.decode(%{"budget" => 5})
+
+      assert {:error, "each of a judge's questions has a question"} =
+               WardrikPolicy.decode(%{"judge" => %{"questions" => [%{"ask" => 0.5}]}})
+
+      assert {:error, "a judge's questions are a list"} =
+               WardrikPolicy.decode(%{"judge" => %{"questions" => "all"}})
+
+      assert {:error, "a judge is a map" <> _} = WardrikPolicy.decode(%{"judge" => "yes"})
+    end
+  end
+
   describe "new!/1" do
     test "reads a policy written as a file writes it" do
       assert %WardrikPolicy{default: :ask, rules: [_]} =
