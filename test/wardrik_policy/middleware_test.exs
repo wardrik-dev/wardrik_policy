@@ -37,7 +37,7 @@ defmodule WardrikPolicy.MiddlewareTest do
   end
 
   test "a call that asks parks on the question", %{context: context} do
-    assert {:park, %Ask{prompt: "books/create_bill needs your approval."}, _context} =
+    assert {:park, %Ask{message: "books/create_bill needs your approval."}, _context} =
              run(context, "books__create_bill")
   end
 
@@ -48,7 +48,7 @@ defmodule WardrikPolicy.MiddlewareTest do
     assert {:ok, _context} = run(context, "list_issues")
     assert {:ok, _context} = run(context, "refund_order")
 
-    assert {:park, %Ask{prompt: "open_issue needs your approval."}, _context} =
+    assert {:park, %Ask{message: "open_issue needs your approval."}, _context} =
              run(context, "open_issue")
   end
 
@@ -75,13 +75,19 @@ defmodule WardrikPolicy.MiddlewareTest do
     setup %{context: context} do
       agent_id = "events-#{System.unique_integer([:positive])}"
       test = self()
-      events = [[:wardrik_policy, :decision], [:wardrik_policy, :answer]]
+
+      events = [
+        [:wardrik_policy, :decision],
+        [:wardrik_policy, :answer],
+        [:wardrik, :tool_call, :denied],
+        [:wardrik, :interrupt, :resolved]
+      ]
 
       :telemetry.attach_many(
         agent_id,
         events,
-        fn [:wardrik_policy, event], _measurements, metadata, _config ->
-          if metadata.agent_id == agent_id, do: send(test, {event, metadata})
+        fn name, _measurements, metadata, _config ->
+          if metadata.agent_id == agent_id, do: send(test, {List.last(name), metadata})
         end,
         nil
       )
@@ -98,6 +104,36 @@ defmodule WardrikPolicy.MiddlewareTest do
                         call: %{name: "shell__exec"},
                         decision: %WardrikPolicy.Decision{effect: :deny, rule: "shell/*"}
                       }}
+    end
+
+    test "a call the rules refuse is the protocol's tool_call.denied", %{context: context} do
+      run(context, "shell__exec")
+
+      assert_receive {:denied,
+                      %{
+                        tool: %{name: "shell__exec", call: %{id: "1"}},
+                        reason: "No shell.",
+                        decided: %{by: "hook"}
+                      }}
+    end
+
+    test "an answer is the protocol's interrupt.resolved", %{context: context} do
+      maria = %WardrikCore.Principal{id: "user:maria"}
+      resume(context, "books__create_bill", %{"1" => {:approve, "Pay it Friday."}}, %{by: maria})
+
+      assert_receive {:resolved,
+                      %{
+                        interrupt: %{id: "1"},
+                        decision: "approved",
+                        note: "Pay it Friday.",
+                        resolved_by: ^maria
+                      }}
+
+      resume(context, "books__create_bill", %{"1" => {:deny, "Not this month."}})
+
+      assert_receive {:resolved, %{decision: "rejected", reason: "Not this month."} = resolved}
+      refute Map.has_key?(resolved, :resolved_by)
+      assert_receive {:denied, %{reason: "Not this month.", decided: %{by: "person"}}}
     end
 
     test "a person's answer is an event", %{context: context} do
@@ -178,7 +214,7 @@ defmodule WardrikPolicy.MiddlewareTest do
         {:ok, %{"q0" => %{"probability" => 0.8}, "q1" => %{"probability" => 0.1}}, %{usd: 0.0002}}
       end)
 
-      assert {:park, %Ask{prompt: "Judged 80% likely: Does it change the books?"},
+      assert {:park, %Ask{message: "Judged 80% likely: Does it change the books?"},
               %Context{measurements: %{usd: 0.0002}}} =
                run(context, "books__create_bill", %{amount: 9400})
     end
@@ -188,7 +224,7 @@ defmodule WardrikPolicy.MiddlewareTest do
         {:ok, %{}, %{}}
       end)
 
-      assert {:park, %Ask{prompt: "The judge couldn't answer (:no_answer)" <> _rest}, _context} =
+      assert {:park, %Ask{message: "The judge couldn't answer (:no_answer)" <> _rest}, _context} =
                run(context, "web_search")
     end
   end
@@ -210,7 +246,7 @@ defmodule WardrikPolicy.MiddlewareTest do
     test "the call that crosses a limit runs, and the next one asks", %{context: context} do
       {:ok, context} = generate(context, usd: 1.20)
 
-      assert {:park, %Ask{prompt: "This agent has spent $1.20 of $1.00 today." <> _rest},
+      assert {:park, %Ask{message: "This agent has spent $1.20 of $1.00 today." <> _rest},
               _context} =
                generate(context)
     end
@@ -220,7 +256,7 @@ defmodule WardrikPolicy.MiddlewareTest do
       {:ok, context} = generate(answered(context, %{"model" => :approve}), usd: 0.50)
       {:ok, context} = generate(%{context | resume: nil}, usd: 0.60)
 
-      assert {:park, %Ask{prompt: "This agent has spent $2.30 of $2.20 today." <> _rest},
+      assert {:park, %Ask{message: "This agent has spent $2.30 of $2.20 today." <> _rest},
               _context} =
                generate(context)
     end
@@ -305,7 +341,13 @@ defmodule WardrikPolicy.MiddlewareTest do
       )
 
   defp answered(context, decisions),
-    do: %{context | resume: %WardrikCore.Resume{reason: %Ask{prompt: "asked"}, input: decisions}}
+    do: %{
+      context
+      | resume: %WardrikCore.Resume{
+          reason: %Ask{interrupt: "tool_approval", message: "asked"},
+          input: decisions
+        }
+    }
 
   defp run(context, name, args \\ %{}) do
     arguments = Map.new(args, fn {key, value} -> {to_string(key), value} end)
@@ -315,7 +357,7 @@ defmodule WardrikPolicy.MiddlewareTest do
 
   defp resume(context, name, decisions, metadata \\ %{}) do
     resume = %WardrikCore.Resume{
-      reason: %Ask{prompt: "asked"},
+      reason: %Ask{interrupt: "tool_approval", message: "asked"},
       input: decisions,
       metadata: metadata
     }

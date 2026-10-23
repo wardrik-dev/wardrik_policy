@@ -61,7 +61,7 @@ defmodule WardrikPolicy.AgentTest do
     assert_receive {:stopped, %{agent_id: ^id, outcome: :park}}
     refute_received {:billed, _amount}
 
-    assert {:tool_calls, [{%{id: "call_1"}, {:park, %Ask{prompt: "Over $1,000."}}}]} =
+    assert {:tool_calls, [{%{id: "call_1"}, {:park, %Ask{message: "Over $1,000."}}}]} =
              WardrikCore.parked(agent)
 
     :ok = WardrikCore.resume(agent, %{"call_1" => :approve})
@@ -92,7 +92,7 @@ defmodule WardrikPolicy.AgentTest do
     :ok = WardrikCore.ask(agent, "Pay the invoice.")
     assert_receive {:stopped, %{agent_id: ^id, outcome: :park}}
 
-    assert %Ask{prompt: "This agent has used 1,200 of 1,000 tokens today." <> _rest} =
+    assert %Ask{message: "This agent has used 1,200 of 1,000 tokens today." <> _rest} =
              WardrikCore.parked(agent)
 
     :ok = WardrikCore.resume(agent, %{"model" => :approve})

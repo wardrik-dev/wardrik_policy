@@ -26,6 +26,11 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     is `nil` for a model call. An answer carries the `metadata` given to `WardrikCore.resume/3`, like
     who answered.
 
+    It also emits the events of Wardrik's protocol, `[:wardrik, :tool_call, :denied]` for a refused
+    tool call and `[:wardrik, :interrupt, :resolved]` for an answer, with their data as
+    `wardrik_protocol` describes it. Give `WardrikCore.resume/3` the person who answered as `:by`,
+    and it's the answer's `resolved_by`.
+
     Reach for this when an agent's tools can spend money, send mail, or change anything you'd want
     a say in.
     """
@@ -70,20 +75,25 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
     defp follow(%Decision{effect: :allow}, context, _call, run, _approved), do: run.(context)
 
-    defp follow(%Decision{effect: :deny, message: message}, context, call, _run, _approved),
-      do: refused(context, call, message)
+    defp follow(%Decision{effect: :deny, message: message}, context, call, _run, _approved) do
+      denied(context, call, message, "hook")
+      refused(context, call, message)
+    end
 
-    defp follow(%Decision{effect: :ask, message: prompt}, context, call, _run, approved) do
+    defp follow(%Decision{effect: :ask, message: message}, context, call, _run, approved) do
       case answer(context, call) do
         nil ->
-          {:park, %Ask{prompt: prompt}, context}
+          {:park, %Ask{interrupt: interrupt(call), message: message}, context}
 
         answer ->
           emit(:answer, context, call, %{answer: answer, metadata: context.resume.metadata})
-
+          resolved(context, call, answer)
           answered(answer, context, call, approved)
       end
     end
+
+    defp interrupt(nil), do: "model_approval"
+    defp interrupt(_call), do: "tool_approval"
 
     defp decide_opts(context, call) do
       annotations = annotations(Context.tool(context, call))
@@ -135,7 +145,10 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     defp answered({:approve, note}, context, _call, next),
       do: with({:ok, context} <- next.(context), do: {:ok, noted(context, note)})
 
-    defp answered({:deny, reason}, context, call, _next), do: refused(context, call, reason)
+    defp answered({:deny, reason}, context, call, _next) do
+      denied(context, call, reason, "person")
+      refused(context, call, reason)
+    end
 
     defp refused(_context, nil, message), do: {:error, message}
     defp refused(context, _call, message), do: {:ok, %{context | response: {:error, message}}}
@@ -151,6 +164,43 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
         Map.merge(%{agent_id: context.agent_id, span: context.span, call: call}, metadata)
       )
     end
+
+    defp denied(_context, nil, _reason, _by), do: :ok
+
+    defp denied(context, call, reason, by) do
+      WardrikCore.Event.emit(context, [:wardrik, :tool_call, :denied], %{}, %{
+        agent_id: context.agent_id,
+        span: context.span,
+        tool: %{name: call.name, call: %{id: call.id}},
+        reason: reason,
+        decided: %{by: by}
+      })
+    end
+
+    defp resolved(context, call, answer) do
+      WardrikCore.Event.emit(
+        context,
+        [:wardrik, :interrupt, :resolved],
+        %{},
+        Map.merge(
+          %{agent_id: context.agent_id, span: context.span, interrupt: %{id: answer_id(call)}},
+          resolution(answer, context.resume.metadata)
+        )
+      )
+    end
+
+    defp resolution(answer, metadata) do
+      answer
+      |> decision()
+      |> put_present(:resolved_by, Map.get(metadata || %{}, :by))
+    end
+
+    defp decision(:approve), do: %{decision: "approved"}
+    defp decision({:approve, note}), do: %{decision: "approved", note: note}
+    defp decision({:deny, reason}), do: %{decision: "rejected", reason: reason}
+
+    defp put_present(map, _key, nil), do: map
+    defp put_present(map, key, value), do: Map.put(map, key, value)
 
     defp noted(%Context{response: {:ok, result}} = context, note),
       do: %{context | response: {:ok, %{"result" => result, "note" => note}}}

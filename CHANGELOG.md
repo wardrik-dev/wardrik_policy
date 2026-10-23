@@ -9,3 +9,5 @@
 - Judges that ask a model yes-or-no questions about a call, and decide by the probability of yes.
 - `WardrikPolicy.Middleware`, which holds a WardrikCore agent to its policies, parks calls that ask,
   and reports every decision as a telemetry event and on its step's span.
+- A parked call's `WardrikPolicy.Ask` names its `interrupt` and `message`, and the middleware emits
+  the protocol's `wardrik.tool_call.denied` and `wardrik.interrupt.resolved`.
