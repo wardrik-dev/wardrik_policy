@@ -26,10 +26,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     is `nil` for a model call. An answer carries the `metadata` given to `WardrikCore.resume/3`, like
     who answered.
 
-    It also emits the events of Wardrik's protocol, `[:wardrik, :tool_call, :denied]` for a refused
-    tool call and `[:wardrik, :interrupt, :resolved]` for an answer, with their data as
-    `wardrik_protocol` describes it. Give `WardrikCore.resume/3` the person who answered as `:by`,
-    and it's the answer's `resolved_by`.
+    It also emits `[:wardrik, :tool_call, :denied]` and `[:wardrik, :interrupt, :resolved]`.
 
     Reach for this when an agent's tools can spend money, send mail, or change anything you'd want
     a say in.
