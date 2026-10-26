@@ -36,6 +36,16 @@ defmodule WardrikPolicy.JudgeTest do
     assert %Decision{effect: :ask, cause: :no_rule} = explain(policy, "books__list", [0.2, 0.2])
   end
 
+  test "its allow holds only while the run has read nothing from outside", %{judge: judge} do
+    policy = WardrikPolicy.new!(default: :ask, judge: judge)
+
+    assert %Decision{effect: :ask, cause: :no_rule} =
+             explain(policy, "books__list", [0.01, 0.2], labels: ["outside"])
+
+    assert %Decision{effect: :ask, cause: :judge} =
+             explain(policy, "books__list", [0.6, 0.2], labels: ["outside"])
+  end
+
   test "asks only the questions that name the call", %{judge: judge} do
     policy = WardrikPolicy.new!(judge: judge)
     test = self()

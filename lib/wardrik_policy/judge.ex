@@ -35,7 +35,8 @@ defmodule WardrikPolicy.Judge do
   it with `WardrikCore.evaluate/4`.
 
   A deny beats an ask, and an ask beats an allow, across the questions and the rules. A judge's
-  allow never lifts a call a rule asks about or denies. A judge that can't answer asks a person if
+  allow never lifts a call a rule asks about or denies, and holds only while the call's run has read
+  nothing from outside. A judge that can't answer asks a person if
   any of its questions could ask or deny.
 
   Its allow trusts the call's arguments, and they may be written to fool it. Reach for it as a
@@ -47,6 +48,8 @@ defmodule WardrikPolicy.Judge do
   alias WardrikPolicy.Name
 
   alias WardrikPolicy.Read
+
+  @outside "outside"
 
   defstruct model: "typesafe:jev-latest", questions: []
 
@@ -120,7 +123,7 @@ defmodule WardrikPolicy.Judge do
   def weigh(decision, nil, _call), do: decision
 
   def weigh(decision, judge, call) do
-    case judge(judge, call) do
+    case judge |> judge(call) |> trusted(call) do
       {:pass, measurements} ->
         %{decision | measurements: measurements}
 
@@ -135,6 +138,12 @@ defmodule WardrikPolicy.Judge do
       asked -> answered(asked, evaluation(judge, asked, call))
     end
   end
+
+  defp trusted({:allow, measurements}, %Call{labels: labels}) do
+    if @outside in labels, do: {:pass, measurements}, else: {:allow, measurements}
+  end
+
+  defp trusted(judged, _call), do: judged
 
   defp judged(policy, :allow), do: %Decision{effect: :allow, policy: policy, cause: :judge}
 

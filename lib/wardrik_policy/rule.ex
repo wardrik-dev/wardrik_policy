@@ -5,10 +5,15 @@ defmodule WardrikPolicy.Rule do
   alias WardrikPolicy.Pattern
 
   @enforce_keys [:effect, :pattern]
-  defstruct [:effect, :pattern, :message]
+  defstruct [:effect, :pattern, :message, :after]
 
   @type effect() :: :allow | :ask | :deny
-  @type t() :: %__MODULE__{effect: effect(), pattern: Pattern.t(), message: String.t() | nil}
+  @type t() :: %__MODULE__{
+          effect: effect(),
+          pattern: Pattern.t(),
+          message: String.t() | nil,
+          after: String.t() | nil
+        }
 
   @spec whole?(t(), Call.t()) :: boolean()
   def whole?(%__MODULE__{pattern: pattern, effect: effect}, %Call{} = call) do

@@ -9,6 +9,7 @@ defmodule WardrikPolicy.Rules do
   alias WardrikPolicy.Rule
 
   @effects [:allow, :ask, :deny]
+  @outside "outside"
 
   @spec decide(WardrikPolicy.t(), Call.t()) :: Decision.t()
   def decide(policy, %Call{name: name} = call) do
@@ -17,17 +18,20 @@ defmodule WardrikPolicy.Rules do
 
     case strictest(whole ++ Enum.concat(per_resource)) do
       nil -> by_default(policy, name)
-      %Rule{effect: :allow} = rule -> allowed(policy, name, rule, {whole, per_resource})
+      %Rule{effect: :allow} = rule -> allowed(policy, call, rule, {whole, per_resource})
       %Rule{} = rule -> named(policy, rule, name)
     end
   end
 
   @spec decode(map()) :: {:ok, [Rule.t()]} | {:error, String.t()}
   def decode(fields) do
-    @effects
-    |> Enum.flat_map(&entries(fields, &1))
-    |> Enum.map(fn {effect, entry} -> rule(effect, entry) end)
-    |> Read.all()
+    with {:ok, after_labels} <- after_labels(Map.get(fields, "allow_after", %{})) do
+      @effects
+      |> Enum.flat_map(&entries(fields, &1))
+      |> Enum.concat(after_labels)
+      |> Enum.map(fn {effect, entry} -> rule(effect, entry) end)
+      |> Read.all()
+    end
   end
 
   defp for_resource(rules, call, resource),
@@ -36,15 +40,49 @@ defmodule WardrikPolicy.Rules do
   defp strictest([]), do: nil
   defp strictest(rules), do: Enum.min_by(rules, &Decision.strictness(&1.effect))
 
-  defp allowed(policy, name, rule, {whole, per_resource}) do
-    if covered?(whole, per_resource),
-      do: named(policy, rule, name),
-      else: by_default(policy, name)
+  defp allowed(policy, call, rule, speaking) do
+    if covered?(speaking, fn _rule -> true end),
+      do: named_or_held(policy, call, rule, speaking),
+      else: by_default(policy, call.name)
   end
 
-  defp covered?([_rule | _rules], _per_resource), do: true
-  defp covered?([], []), do: false
-  defp covered?([], per_resource), do: Enum.all?(per_resource, &(&1 != []))
+  defp named_or_held(policy, call, rule, speaking) do
+    case holding_label(policy, call, speaking) do
+      nil -> named(policy, rule, call.name)
+      label -> held(policy, rule, call.name, label)
+    end
+  end
+
+  defp holding_label(policy, %Call{annotations: %{gated: true}, labels: labels}, speaking),
+    do: Enum.find(labels, &(&1 in holding(policy) and not covered?(speaking, after?(&1))))
+
+  defp holding_label(_policy, _call, _speaking), do: nil
+
+  defp holding(policy),
+    do: Enum.uniq([@outside | for(%Rule{after: label} <- policy.rules, label, do: label)])
+
+  defp after?(label), do: &(&1.after == label)
+
+  defp covered?({whole, per_resource}, test),
+    do: Enum.any?(whole, test) or each_covered?(per_resource, test)
+
+  defp each_covered?([], _test), do: false
+  defp each_covered?(per_resource, test), do: Enum.all?(per_resource, &Enum.any?(&1, test))
+
+  defp held(policy, %Rule{pattern: pattern}, name, label) do
+    %Decision{
+      effect: :ask,
+      message:
+        "#{Name.shown(name)} is allowed, but this run has read #{described(label)}, " <>
+          "which may be what asked for it.",
+      rule: to_string(pattern),
+      policy: policy.name,
+      cause: :label
+    }
+  end
+
+  defp described(@outside), do: "content from outside"
+  defp described(label), do: "content labelled #{label}"
 
   defp named(policy, %Rule{effect: effect, message: message, pattern: pattern}, name) do
     %Decision{
@@ -79,6 +117,23 @@ defmodule WardrikPolicy.Rules do
   defp listed(patterns) when is_list(patterns), do: Enum.map(patterns, &{&1, nil})
   defp listed(patterns) when is_map(patterns), do: Enum.to_list(patterns)
   defp listed(other), do: [{other, :not_a_list}]
+
+  defp after_labels(labels) when is_map(labels) do
+    case Enum.reject(Map.keys(labels), &(is_binary(&1) and &1 != "")) do
+      [] ->
+        {:ok,
+         for({label, patterns} <- labels, entry <- listed(patterns), do: {{:allow, label}, entry})}
+
+      [label | _others] ->
+        {:error, "allow_after names #{inspect(label)}, which is not a label"}
+    end
+  end
+
+  defp after_labels(_other), do: {:error, "allow_after is a map of label to tool patterns"}
+
+  defp rule({:allow, label}, entry) do
+    with {:ok, rule} <- rule(:allow, entry), do: {:ok, %{rule | after: label}}
+  end
 
   defp rule(effect, {_pattern, :not_a_list}),
     do: {:error, "#{effect} is a list of tool patterns, or a map of pattern to message"}

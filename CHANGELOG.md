@@ -11,3 +11,6 @@
   and reports every decision as a telemetry event and on its step's span.
 - A parked call's `WardrikPolicy.Ask` names its `interrupt` and `message`, and the middleware emits
   the protocol's `wardrik.tool_call.denied` and `wardrik.interrupt.resolved`.
+- Gated calls wait for a person once the run has read content from outside, unless `allow_after`
+  allows them after that label. A judge's allow holds only before. Asks and decision events carry
+  the run's labels.

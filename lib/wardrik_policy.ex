@@ -48,6 +48,25 @@ defmodule WardrikPolicy do
       iex> WardrikPolicy.decide(policy, "web_search")
       {:ask, "web_search needs your approval."}
 
+  Once a run has read content from outside, such as a web page or a search result, a gated tool's
+  call waits for a person however the rules allow it, since what the run read may be what asked for
+  it. Pass the run's labels as `:labels`. `allow_after` allows a call by name as `allow` does, and
+  holds after its label too, for tools a stranger can't misuse:
+
+      iex> policy =
+      ...>   WardrikPolicy.new!(
+      ...>     allow: ["linear/*"],
+      ...>     allow_after: %{"outside" => ["github/add_labels"]}
+      ...>   )
+      iex> gated = %{gated: true}
+      iex> WardrikPolicy.decide(policy, "linear__create_issue", annotations: gated, labels: ["outside"])
+      {:ask, "linear/create_issue is allowed, but this run has read content from outside, which may be what asked for it."}
+      iex> WardrikPolicy.decide(policy, "github__add_labels", annotations: gated, labels: ["outside"])
+      :allow
+
+  A label `allow_after` names holds gated calls the way `outside` does. One no rule names holds
+  nothing.
+
   A policy can hold a budget too, which caps what the agent spends on model calls. See
   `WardrikPolicy.Budget`. And a judge, which asks a model about each call. See
   `WardrikPolicy.Judge`.
@@ -73,7 +92,7 @@ defmodule WardrikPolicy do
   @type effect() :: :allow | :ask | :deny
   @type decision() :: :allow | {:ask, String.t()} | {:deny, String.t()}
 
-  @keys ~w(allow ask deny default budget judge)
+  @keys ~w(allow allow_after ask deny default budget judge)
 
   @doc """
   Builds a policy from a keyword list or map of rules, a `budget:` and a `judge:`. See
@@ -120,8 +139,8 @@ defmodule WardrikPolicy do
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`.
 
-  Pass the call's `:arguments`, the `:resources` it acts on, and the tool's `:annotations`, like
-  `%{read_only: true}`. A policy with a judge asks its model through `:evaluate`; see
+  Pass the call's `:arguments`, the `:resources` it acts on, the tool's `:annotations`, like
+  `%{read_only: true}`, and the `:labels` of what its run has read. A policy with a judge asks its model through `:evaluate`; see
   `t:WardrikPolicy.Judge.evaluate/0`.
   """
   @spec decide(t() | [t()], String.t(), keyword()) :: decision()
@@ -136,7 +155,15 @@ defmodule WardrikPolicy do
   """
   @spec explain(t() | [t()], String.t(), keyword()) :: Decision.t()
   def explain(policies, name, opts \\ []) do
-    opts = Keyword.validate!(opts, arguments: %{}, resources: [], annotations: %{}, evaluate: nil)
+    opts =
+      Keyword.validate!(opts,
+        arguments: %{},
+        resources: [],
+        annotations: %{},
+        labels: [],
+        evaluate: nil
+      )
+
     call = Call.new(name, opts)
 
     policies

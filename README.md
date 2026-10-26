@@ -107,6 +107,31 @@ A default speaks for its own policy only. An agent's own allow can't lift its or
 `WardrikPolicy.decode/2` reads the same policy from a map with string keys, as a YAML file writes
 it, its `budget` and `judge` included.
 
+## After content from outside
+
+A run carries labels for what it has read; see `WardrikCore.Context.labels/1`. Once it has read
+content from outside, such as a web page or an issue a stranger filed, a gated tool's call waits for
+a person however the rules allow it, since what it read may be what asked for the call:
+
+```elixir
+policy =
+  WardrikPolicy.new!(
+    allow: ["linear/*"],
+    allow_after: %{"outside" => ["github/add_labels"]}
+  )
+
+WardrikPolicy.decide(policy, "linear__create_issue",
+  annotations: %{gated: true},
+  labels: ["outside"]
+)
+#=> {:ask, "linear/create_issue is allowed, but this run has read content from outside, which may be what asked for it."}
+```
+
+A tool is gated when its annotations say `gated: true`. `allow_after` allows a call by name as
+`allow` does, and holds after its label too, for tools a stranger can't misuse. An ask or deny still
+wins over it. A label `allow_after` names holds gated calls the way `outside` does, and one no rule
+names holds nothing. A judge's allow holds only while the run has read nothing from outside.
+
 ## Judge a call
 
 Some decisions turn on what a call means, not its name. A judge asks a model yes-or-no questions
@@ -192,7 +217,7 @@ What the agent spent stays with it through restarts. A judge asks its model with
 
 A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/2`, giving each
 tool call's id, or `"model"` for a model call, `:approve`, `{:approve, note}` or `{:deny, reason}`.
-A note reaches the model beside the call's result. A reason reaches it as the call's error. To
+The ask carries the run's labels, and so does every decision event. A note reaches the model beside the call's result. A reason reaches it as the call's error. To
 record who answered, pass it as `WardrikCore.resume/3`'s metadata.
 
 A dollar budget needs the model's price. A model with no price in dollars, like one a subscription

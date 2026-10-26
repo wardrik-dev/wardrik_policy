@@ -2,13 +2,14 @@ defmodule WardrikPolicy.Call do
   @moduledoc false
 
   @enforce_keys [:name]
-  defstruct [:name, :evaluate, arguments: %{}, resources: [], annotations: %{}]
+  defstruct [:name, :evaluate, arguments: %{}, resources: [], annotations: %{}, labels: []]
 
   @type t() :: %__MODULE__{
           name: String.t(),
           arguments: map(),
           resources: [String.t()],
           annotations: map(),
+          labels: [String.t()],
           evaluate: WardrikPolicy.Judge.evaluate() | nil
         }
 

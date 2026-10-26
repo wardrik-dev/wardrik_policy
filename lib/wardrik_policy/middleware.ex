@@ -22,8 +22,9 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
     Every decision emits `[:wardrik_policy, :decision]`, and every answer emits
     `[:wardrik_policy, :answer]`, through `WardrikCore.Event`, so they reach the agent's events
-    sink as well as `:telemetry`. Both carry the `agent_id`, the step's `span`, and the `call`, which
-    is `nil` for a model call. An answer carries the `metadata` given to `WardrikCore.resume/3`, like
+    sink as well as `:telemetry`. Both carry the `agent_id`, the step's `span`, the `call`, which
+    is `nil` for a model call, and the `labels` of what the run had read; see
+    `WardrikCore.Context.labels/1`. An answer carries the `metadata` given to `WardrikCore.resume/3`, like
     who answered.
 
     It also emits `[:wardrik, :tool_call, :denied]` and `[:wardrik, :interrupt, :resolved]`.
@@ -80,7 +81,13 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     defp follow(%Decision{effect: :ask, message: message}, context, call, _run, approved) do
       case answer(context, call) do
         nil ->
-          {:park, %Ask{interrupt: interrupt(call), message: message}, context}
+          ask = %Ask{
+            interrupt: interrupt(call),
+            message: message,
+            labels: Context.labels(context)
+          }
+
+          {:park, ask, context}
 
         answer ->
           emit(:answer, context, call, %{answer: answer, metadata: context.resume.metadata})
@@ -99,6 +106,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
         arguments: call.arguments,
         resources: resources(annotations[:resources], call.arguments),
         annotations: annotations,
+        labels: Context.labels(context),
         evaluate: &evaluate(context, &1, &2, &3)
       ]
     end
@@ -158,7 +166,15 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
         context,
         [:wardrik_policy, event],
         %{},
-        Map.merge(%{agent_id: context.agent_id, span: context.span, call: call}, metadata)
+        Map.merge(
+          %{
+            agent_id: context.agent_id,
+            span: context.span,
+            call: call,
+            labels: Context.labels(context)
+          },
+          metadata
+        )
       )
     end
 

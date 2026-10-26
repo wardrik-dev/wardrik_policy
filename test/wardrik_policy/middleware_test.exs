@@ -71,6 +71,23 @@ defmodule WardrikPolicy.MiddlewareTest do
              run(context, "books__create_bill")
   end
 
+  describe "labels" do
+    setup %{context: context} do
+      messages = [ReqLLM.Context.user("Look at this page.", %{labels: ["outside"]})]
+      tools = [tool("refund_order", gated: true) | context.tools]
+      %{context: %{context | messages: messages, tools: tools}}
+    end
+
+    test "a gated call waits once the run has read content from outside, with its labels",
+         %{context: context} do
+      assert {:park, %Ask{labels: ["outside"], message: message}, _context} =
+               run(context, "refund_order")
+
+      assert message =~ "refund_order is allowed, but this run has read content from outside"
+      assert {:ok, _context} = run(context, "write_file", %{path: "notes/a"})
+    end
+  end
+
   describe "events" do
     setup %{context: context} do
       agent_id = "events-#{System.unique_integer([:positive])}"
@@ -97,11 +114,15 @@ defmodule WardrikPolicy.MiddlewareTest do
     end
 
     test "each decision is an event, with the rule that made it", %{context: context} do
-      run(context, "shell__exec")
+      run(
+        %{context | messages: [ReqLLM.Context.user("Hi.", %{labels: ["outside"]})]},
+        "shell__exec"
+      )
 
       assert_receive {:decision,
                       %{
                         call: %{name: "shell__exec"},
+                        labels: ["outside"],
                         decision: %WardrikPolicy.Decision{effect: :deny, rule: "shell/*"}
                       }}
     end

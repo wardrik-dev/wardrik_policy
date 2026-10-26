@@ -5,7 +5,8 @@ defmodule WardrikPolicy.Decision do
   `policy` names the policy that decided, when it has a name. The cause is `:rule` when a rule
   named the call, and `rule` holds that rule. It's `:no_rule` when no rule covered the whole call,
   so the policy's `default:` decided. It's `:judge` when the policy's judge decided, and
-  `:budget` when a model call reached the policy's budget.
+  `:budget` when a model call reached the policy's budget. It's `:label` when a rule allowed a gated
+  call, but its run had read what a label marks, such as content from outside.
   """
 
   @enforce_keys [:effect, :cause]
@@ -16,7 +17,7 @@ defmodule WardrikPolicy.Decision do
           message: String.t() | nil,
           rule: String.t() | nil,
           policy: String.t() | nil,
-          cause: :rule | :no_rule | :judge | :budget,
+          cause: :rule | :no_rule | :judge | :budget | :label,
           measurements: %{optional(term()) => number()}
         }
 
