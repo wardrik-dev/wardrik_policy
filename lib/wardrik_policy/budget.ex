@@ -104,13 +104,20 @@ defmodule WardrikPolicy.Budget do
 
   @doc """
   Checks what was spent against the budget. Returns `:allow`, `{:ask, prompt}` or
-  `{:deny, message}`, as `on_exhausted` says.
+  `{:deny, message}`, as `on_exhausted` says. `:spender` says who spent it, `"This agent has"`
+  unless set.
+
+      iex> policy = WardrikPolicy.new!(budget: [usd: 5.00, on_exhausted: :deny])
+      iex> WardrikPolicy.Budget.check(policy.budget, %{usd: 5.02}, spender: "acme's agents have")
+      {:deny, "acme's agents have spent $5.02 of $5.00 today."}
   """
-  @spec check(t(), spent()) :: WardrikPolicy.decision()
-  def check(%__MODULE__{} = budget, spent) do
+  @spec check(t(), spent(), keyword()) :: WardrikPolicy.decision()
+  def check(%__MODULE__{} = budget, spent, opts \\ []) do
+    spender = Keyword.get(opts, :spender, "This agent has")
+
     case Enum.find(@kinds, &exhausted?(budget, spent, &1)) do
       nil -> :allow
-      kind -> {budget.on_exhausted, message(budget, spent, kind)}
+      kind -> {budget.on_exhausted, message(budget, spent, kind, spender)}
     end
   end
 
@@ -175,19 +182,19 @@ defmodule WardrikPolicy.Budget do
 
   defp more(budget, kind), do: budget.grant[kind] || Map.fetch!(budget, kind)
 
-  defp message(budget, spent, kind) do
-    reached = reached(kind, used(spent, kind), limit(budget, spent, kind), budget.per)
+  defp message(budget, spent, kind, spender) do
+    reached = reached(kind, spender, used(spent, kind), limit(budget, spent, kind), budget.per)
 
     if budget.on_exhausted == :ask,
       do: "#{reached} #{offer(kind, more(budget, kind))}",
       else: reached
   end
 
-  defp reached(:usd, used, limit, per),
-    do: "This agent has spent #{dollars(used)} of #{dollars(limit)}#{during(per)}."
+  defp reached(:usd, spender, used, limit, per),
+    do: "#{spender} spent #{dollars(used)} of #{dollars(limit)}#{during(per)}."
 
-  defp reached(:tokens, used, limit, per),
-    do: "This agent has used #{count(used)} of #{count(limit)} tokens#{during(per)}."
+  defp reached(:tokens, spender, used, limit, per),
+    do: "#{spender} used #{count(used)} of #{count(limit)} tokens#{during(per)}."
 
   defp offer(:usd, amount), do: "Approve to allow #{dollars(amount)} more."
   defp offer(:tokens, amount), do: "Approve to allow #{count(amount)} more."
