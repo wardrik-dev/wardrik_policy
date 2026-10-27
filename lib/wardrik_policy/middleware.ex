@@ -14,7 +14,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
     A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/2`, giving
     each tool call's id, or `"model"` for a model call, `:approve`, `{:approve, note}` or
-    `{:deny, reason}`.
+    `{:deny, reason}`. A call parked `:in_doubt`, as it may have run, takes the answer to that as its
+    own, so a person who said to run it again isn't asked twice.
 
     Each decision is set on the step as the `"wardrik.policy.decision"` attribute; see
     `WardrikCore.Context.attribute/3`. A refused tool call is answered with the refusal as its error,
@@ -139,6 +140,10 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
 
     defp answer(%Context{resume: %Resume{reason: %Ask{}, input: input}}, call) when is_map(input),
       do: Map.get(input, answer_id(call))
+
+    defp answer(%Context{resume: %Resume{reason: :in_doubt, input: input}}, %{id: id})
+         when is_map(input),
+         do: Map.get(input, id)
 
     defp answer(_context, _call), do: nil
 

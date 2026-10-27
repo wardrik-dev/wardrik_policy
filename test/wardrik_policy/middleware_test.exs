@@ -198,6 +198,19 @@ defmodule WardrikPolicy.MiddlewareTest do
       assert {:park, %Ask{}, _context} = resume(context, "books__create_bill", %{"2" => :approve})
     end
 
+    test "a call a person approved running again, as it may have run, runs without asking again",
+         %{context: context} do
+      resume = %WardrikCore.Resume{reason: :in_doubt, input: %{"1" => :approve}}
+
+      assert {:ok, %Context{response: {:ok, "ran"}}} =
+               run(%{context | resume: resume}, "books__create_bill")
+
+      resume = %WardrikCore.Resume{reason: :in_doubt, input: %{"1" => {:deny, "Not again."}}}
+
+      assert {:ok, %Context{response: {:error, "Not again."}}} =
+               run(%{context | resume: resume}, "books__create_bill")
+    end
+
     test "a call the policy now refuses is refused, approved or not", %{context: context} do
       context =
         put_in(context.middleware, [{WardrikPolicy.Middleware, WardrikPolicy.new!(deny: ["*"])}])
