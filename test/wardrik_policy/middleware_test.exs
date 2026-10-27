@@ -323,6 +323,16 @@ defmodule WardrikPolicy.MiddlewareTest do
       assert %{0 => %{usd: 0.5}} = Context.get_private(context, WardrikPolicy.Budget)
     end
 
+    test "a price given once a call went unpriced lets the next one run", %{context: context} do
+      {:ok, context} = generate(context, usd: nil, tokens: 10)
+
+      priced =
+        WardrikPolicy.new!(budget: [usd: 1.00, tokens: 1000, price: [input: 1.0, output: 1.0]])
+
+      assert {:ok, _context} =
+               generate(%{context | middleware: [{WardrikPolicy.Middleware, priced}]})
+    end
+
     test "a new period starts the count over", %{context: context} do
       context = Context.put_private(context, WardrikPolicy.Budget, %{0 => %{period: :yesterday}})
 

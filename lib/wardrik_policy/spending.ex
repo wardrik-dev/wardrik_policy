@@ -70,7 +70,9 @@ if Code.ensure_loaded?(WardrikCore.Context) do
     defp current(_spent, period),
       do: %{period: period, usd: 0, tokens: 0, granted: %{}, unpriced: false}
 
-    defp decision(%WardrikPolicy{budget: %Budget{usd: usd}} = policy, %{unpriced: true})
+    defp decision(%WardrikPolicy{budget: %Budget{usd: usd, price: nil}} = policy, %{
+           unpriced: true
+         })
          when usd != nil do
       %Decision{
         effect: :deny,
