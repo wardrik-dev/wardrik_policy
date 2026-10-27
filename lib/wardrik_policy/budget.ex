@@ -62,7 +62,8 @@ defmodule WardrikPolicy.Budget do
   @type spent() :: %{
           optional(:usd) => number(),
           optional(:tokens) => non_neg_integer(),
-          optional(:granted) => %{optional(:usd) => number(), optional(:tokens) => integer()}
+          optional(:granted) => %{optional(:usd) => number(), optional(:tokens) => integer()},
+          optional(atom()) => term()
         }
   @type period() :: :turn | :total | {:day | :week | :month, Date.t()}
 
