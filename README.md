@@ -171,6 +171,9 @@ takes:
 | `allow` | allow the call by name below this probability | |
 | `message` | what the person is asked, or the model told, in place of the question | |
 
+A question needs at least one of `deny`, `ask` and `allow`, each a probability from 0 to 1, or it
+decides nothing and the policy is refused. Its `tools` are names alone, without arguments.
+
 `evaluate:` is the function that asks the model. It gives back each question's probability of yes,
 and what the call used, which the decision carries as `measurements`.
 
