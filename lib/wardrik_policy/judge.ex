@@ -100,10 +100,37 @@ defmodule WardrikPolicy.Judge do
 
   defp question(%{"question" => _question} = fields) do
     with {:ok, question} <- Read.keywords(fields, @question, "a question"),
-         do: {:ok, Map.new(question)}
+         question = Map.new(question),
+         :ok <- thresholds(question),
+         :ok <- tools(question),
+         do: decides(question)
   end
 
   defp question(_fields), do: {:error, "each of a judge's questions has a question"}
+
+  defp thresholds(question) do
+    case Enum.find([:deny, :ask, :allow], &(not probability?(Map.get(question, &1, 0)))) do
+      nil -> :ok
+      key -> {:error, "a question's #{key} is a probability between 0 and 1"}
+    end
+  end
+
+  defp probability?(value), do: is_number(value) and value >= 0 and value <= 1
+
+  defp tools(%{tools: tools}) when is_list(tools) do
+    if Enum.all?(tools, &(is_binary(&1) and not String.contains?(&1, "("))),
+      do: :ok,
+      else: {:error, "a question's tools name tools alone, as books/*, without their arguments"}
+  end
+
+  defp tools(%{tools: _tools}), do: {:error, "a question's tools are a list of tool names"}
+  defp tools(_question), do: :ok
+
+  defp decides(question) do
+    if Enum.any?([:deny, :ask, :allow], &Map.has_key?(question, &1)),
+      do: {:ok, question},
+      else: {:error, "a question decides nothing; give it deny, ask or allow"}
+  end
 
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}`, `{:deny, message}`, or

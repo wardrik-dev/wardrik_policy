@@ -230,6 +230,18 @@ defmodule WardrikPolicyTest do
       assert {:error, "each of a judge's questions has a question"} =
                WardrikPolicy.decode(%{"judge" => %{"questions" => [%{"ask" => 0.5}]}})
 
+      for {question, message} <- [
+            {%{"question" => "Publish?"},
+             "a question decides nothing; give it deny, ask or allow"},
+            {%{"question" => "Publish?", "ask" => 1.5},
+             "a question's ask is a probability between 0 and 1"},
+            {%{"question" => "Publish?", "ask" => 0.5, "tools" => ["publish(posts/*)"]},
+             "a question's tools name tools alone, as books/*, without their arguments"}
+          ] do
+        assert {:error, ^message} =
+                 WardrikPolicy.decode(%{"judge" => %{"questions" => [question]}})
+      end
+
       assert {:error, "a judge's questions are a list"} =
                WardrikPolicy.decode(%{"judge" => %{"questions" => "all"}})
 
