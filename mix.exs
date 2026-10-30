@@ -4,7 +4,7 @@ defmodule WardrikPolicy.MixProject do
   def project do
     [
       app: :wardrik_policy,
-      version: "0.1.0",
+      version: "0.1.0-rc.1",
       elixir: "~> 1.20",
       description:
         "Budgets that cap what an agent spends, and rules and judges that decide every tool call it makes.",
