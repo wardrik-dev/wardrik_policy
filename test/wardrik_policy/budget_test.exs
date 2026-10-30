@@ -20,6 +20,21 @@ defmodule WardrikPolicy.BudgetTest do
       end
     end
 
+    test "shows amounts under a dollar to enough places to tell them apart" do
+      for {limit, spent, said} <- [
+            {0.015, 0.0156, "spent $0.0156 of $0.015"},
+            {0.004, 0.00412, "spent $0.00412 of $0.004"},
+            {0.5, 0.503, "spent $0.503 of $0.50"},
+            {0.25, 1.2345, "spent $1.23 of $0.25"},
+            {0.000002, 0.00000213, "spent $0.00000213 of $0.000002"}
+          ] do
+        assert {:deny, message} =
+                 Budget.check(%Budget{usd: limit, on_exhausted: :deny}, %{usd: spent})
+
+        assert message =~ said
+      end
+    end
+
     test "nothing spent is within any budget" do
       assert :allow = Budget.check(%Budget{usd: 1, tokens: 10}, %{})
     end

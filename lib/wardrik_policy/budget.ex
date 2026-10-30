@@ -234,7 +234,17 @@ defmodule WardrikPolicy.Budget do
   defp during(:month), do: " this month"
   defp during(:total), do: ""
 
-  defp dollars(amount), do: "$" <> :erlang.float_to_binary(amount / 1, decimals: 2)
+  defp dollars(amount) when amount >= 1 or amount <= 0,
+    do: "$" <> :erlang.float_to_binary(amount / 1, decimals: 2)
+
+  defp dollars(amount) do
+    places = max(2, 3 - floor(:math.log10(amount)))
+
+    [whole, cents] =
+      (amount / 1) |> :erlang.float_to_binary([:compact, decimals: places]) |> String.split(".")
+
+    "$#{whole}.#{String.pad_trailing(cents, 2, "0")}"
+  end
 
   defp count(amount) do
     amount
