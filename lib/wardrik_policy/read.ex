@@ -16,8 +16,12 @@ defmodule WardrikPolicy.Read do
       [] ->
         :ok
 
-      [key | _keys] ->
+      [key | _keys] when is_binary(key) ->
         {:error, "#{key} is not a setting of #{what}; expected one of #{Enum.join(keys, ", ")}"}
+
+      [key | _keys] ->
+        {:error,
+         "#{inspect(key)} is not a setting of #{what}; settings are strings, one of #{Enum.join(keys, ", ")}"}
     end
   end
 
@@ -48,4 +52,10 @@ defmodule WardrikPolicy.Read do
     do: {:error, "#{key} is one of #{names(choices)}"}
 
   defp names(choices), do: Enum.map_join(choices, ", ", fn {name, _atom} -> name end)
+
+  @spec present(map()) :: map()
+  def present(fields), do: Map.reject(fields, fn {_key, value} -> value in [nil, [], %{}] end)
+
+  @spec written(keyword() | map()) :: %{String.t() => term()}
+  def written(fields), do: Map.new(fields, fn {key, value} -> {Atom.to_string(key), value} end)
 end

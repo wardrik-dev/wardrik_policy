@@ -27,6 +27,21 @@ defmodule WardrikPolicy.Default do
     with {:ok, effect} <- effect(effect), do: {:ok, {effect, %{}}}
   end
 
+  @spec to_json(WardrikPolicy.t()) :: String.t() | map() | nil
+  def to_json(%WardrikPolicy{default: :allow, by_annotation: by_annotation})
+      when map_size(by_annotation) == 0,
+      do: nil
+
+  def to_json(%WardrikPolicy{default: fallback, by_annotation: by_annotation})
+      when map_size(by_annotation) == 0,
+      do: Atom.to_string(fallback)
+
+  def to_json(%WardrikPolicy{default: fallback, by_annotation: by_annotation}) do
+    by_annotation
+    |> Map.put("else", fallback)
+    |> Map.new(fn {annotation, effect} -> {annotation, Atom.to_string(effect)} end)
+  end
+
   @spec for_tool(WardrikPolicy.t(), Call.t()) :: effect()
   def for_tool(
         %WardrikPolicy{default: fallback, by_annotation: by_annotation},

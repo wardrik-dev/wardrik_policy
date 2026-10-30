@@ -76,6 +76,8 @@ defmodule WardrikPolicy do
       iex> WardrikPolicy.decide(policy, "web_search")
       {:ask, "web_search needs your approval."}
 
+  `to_json/1` writes a policy back as that map.
+
   ## Content from outside
 
   A run that has read content from outside, such as a web page, may have been told what to call.
@@ -103,6 +105,7 @@ defmodule WardrikPolicy do
   alias WardrikPolicy.Decision
   alias WardrikPolicy.Default
   alias WardrikPolicy.Judge
+  alias WardrikPolicy.Read
   alias WardrikPolicy.Rules
 
   defstruct name: nil, rules: [], default: :allow, by_annotation: %{}, budget: nil, judge: nil
@@ -158,7 +161,7 @@ defmodule WardrikPolicy do
   def decode(fields, opts) when is_map(fields) do
     opts = Keyword.validate!(opts, [:name])
 
-    with :ok <- known_keys(fields),
+    with :ok <- Read.known(fields, @keys, "a policy"),
          {:ok, rules} <- Rules.decode(fields),
          {:ok, {default, by_annotation}} <- Default.decode(Map.get(fields, "default", :allow)),
          {:ok, budget} <- decoded(Budget, fields["budget"]),
@@ -176,6 +179,22 @@ defmodule WardrikPolicy do
   end
 
   def decode(_fields, _opts), do: {:error, "a policy is a map of allow, ask, deny and default"}
+
+  @doc """
+  Encodes a policy as the map `decode/2` reads, such as to store it as JSON.
+
+  Leaves out what the policy doesn't set. The policy's `:name` is not part of it.
+  """
+  @spec to_json(t()) :: map()
+  def to_json(%__MODULE__{} = policy) do
+    %{
+      "default" => Default.to_json(policy),
+      "budget" => policy.budget && Budget.to_json(policy.budget),
+      "judge" => policy.judge && Judge.to_json(policy.judge)
+    }
+    |> Map.merge(Rules.to_json(policy.rules))
+    |> Read.present()
+  end
 
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`.
@@ -257,15 +276,5 @@ defmodule WardrikPolicy do
     if (is_map(fields) and not is_struct(fields)) or Keyword.keyword?(fields),
       do: Map.new(fields, fn {key, value} -> {to_string(key), value} end),
       else: fields
-  end
-
-  defp known_keys(fields) do
-    case Map.keys(fields) -- @keys do
-      [] ->
-        :ok
-
-      [key | _keys] ->
-        {:error, "#{key} is not a setting; expected one of #{Enum.join(@keys, ", ")}"}
-    end
   end
 end

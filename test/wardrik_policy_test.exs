@@ -247,6 +247,45 @@ defmodule WardrikPolicyTest do
 
       assert {:error, "a judge is a map" <> _} = WardrikPolicy.decode(%{"judge" => "yes"})
     end
+
+    test "says a setting named by an atom is not one" do
+      assert {:error, ":default is not a setting of a policy; settings are strings, one of" <> _} =
+               WardrikPolicy.decode(%{default: :ask})
+
+      assert {:error, ":usd is not a setting of a budget; settings are strings, one of" <> _} =
+               WardrikPolicy.decode(%{"budget" => %{usd: 5}})
+    end
+  end
+
+  describe "to_json/1" do
+    test "encodes a policy as the rules decode/2 reads" do
+      policy =
+        WardrikPolicy.new!(
+          allow: ["web_search", "books/create_bill(amount < 1000)"],
+          ask: %{"books/create_bill(amount >= 1000)" => "A bill this size needs a person."},
+          deny: ["shell/*", "email/send(to != *@acme.com)"],
+          allow_after: %{"outside" => ["github/add_labels"]},
+          default: [read_only: :allow, else: :ask],
+          budget: [usd: 5.00, per: :week, grant: [usd: 2.00], price: [input: 0.6, output: 2.2]],
+          judge: [
+            model: "anthropic:claude-haiku-4-5",
+            questions: [[question: "Does it send money?", tools: ["books/*"], ask: 0.5]]
+          ]
+        )
+
+      json = WardrikPolicy.to_json(policy)
+
+      assert json == json |> JSON.encode!() |> JSON.decode!()
+      assert {:ok, ^policy} = WardrikPolicy.decode(json)
+    end
+
+    test "leaves out what a policy doesn't set" do
+      assert WardrikPolicy.to_json(WardrikPolicy.new!(deny: ["shell/*"])) == %{
+               "deny" => ["shell/*"]
+             }
+
+      assert %{"default" => "deny"} = WardrikPolicy.to_json(WardrikPolicy.new!(default: :deny))
+    end
   end
 
   describe "new!/1" do

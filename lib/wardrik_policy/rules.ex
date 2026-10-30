@@ -34,6 +34,24 @@ defmodule WardrikPolicy.Rules do
     end
   end
 
+  @spec to_json([Rule.t()]) :: map()
+  def to_json(rules) do
+    {after_label, rules} = Enum.split_with(rules, & &1.after)
+
+    rules
+    |> Enum.group_by(&Atom.to_string(&1.effect))
+    |> patterns()
+    |> Map.put("allow_after", after_label |> Enum.group_by(& &1.after) |> patterns())
+  end
+
+  defp patterns(groups), do: Map.new(groups, fn {key, rules} -> {key, written(rules)} end)
+
+  defp written(rules) do
+    if Enum.all?(rules, &is_nil(&1.message)),
+      do: Enum.map(rules, &to_string(&1.pattern)),
+      else: Map.new(rules, &{to_string(&1.pattern), &1.message})
+  end
+
   defp for_resource(rules, call, resource),
     do: Enum.filter(rules, &Rule.resource?(&1, call, resource))
 

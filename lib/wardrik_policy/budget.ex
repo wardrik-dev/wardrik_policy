@@ -106,6 +106,20 @@ defmodule WardrikPolicy.Budget do
 
   def decode(_fields), do: {:error, "a budget is a map of #{Enum.join(@fields, ", ")}"}
 
+  @doc "Encodes a budget as the map `decode/1` reads. Leaves out what the budget doesn't set."
+  @spec to_json(t()) :: map()
+  def to_json(%__MODULE__{} = budget) do
+    Read.present(%{
+      "usd" => budget.usd,
+      "tokens" => budget.tokens,
+      "per" => Atom.to_string(budget.per),
+      "timezone" => budget.timezone,
+      "grant" => Read.written(budget.grant),
+      "price" => budget.price && Read.written(budget.price),
+      "on_exhausted" => Atom.to_string(budget.on_exhausted)
+    })
+  end
+
   @doc """
   Checks what was spent against the budget.
 

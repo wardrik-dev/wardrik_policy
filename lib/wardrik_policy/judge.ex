@@ -104,6 +104,11 @@ defmodule WardrikPolicy.Judge do
 
   def decode(_fields), do: {:error, "a judge is a map of model and questions"}
 
+  @doc "Encodes a judge as the map `decode/1` reads."
+  @spec to_json(t()) :: map()
+  def to_json(%__MODULE__{model: model, questions: questions}),
+    do: %{"model" => model, "questions" => Enum.map(questions, &Read.written/1)}
+
   defp questions(questions) when is_list(questions) do
     questions
     |> Enum.map(&question/1)
