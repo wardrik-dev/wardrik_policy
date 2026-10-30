@@ -1,37 +1,52 @@
 if Code.ensure_loaded?(WardrikCore.Middleware) do
   defmodule WardrikPolicy.Middleware do
     @moduledoc """
-    A `WardrikCore.Middleware` that runs a `WardrikPolicy` on every call an agent makes.
+    A `WardrikCore.Middleware` that holds an agent to one or more policies.
 
         middleware: [{WardrikPolicy.Middleware, WardrikPolicy.new!(deny: ["shell/*"])}]
 
-    Give it a list to hold an agent to several policies at once, like an org's and its own.
+    Pass a list to hold an agent to several policies, such as its org's and its own:
 
-    The rules, and a policy's judge, decide each tool call before it runs. A judge asks its model with
-    `WardrikCore.evaluate/4`. A policy's budget checks each model call before
-    it runs, and counts what it spent after. What was spent stays with the agent in its context's
-    private data; see `WardrikCore.Context`.
+        middleware: [{WardrikPolicy.Middleware, [org_policy, agent_policy]}]
 
-    A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/2`, giving
-    each tool call's id, or `"model"` for a model call, `:approve`, `{:approve, note}` or
-    `{:deny, reason}`. A call parked `:in_doubt`, as it may have run, takes the answer to that as its
-    own, so a person who said to run it again isn't asked twice.
+    For each tool call, it decides by the rules and judge before the call runs. A judge asks its
+    model with `WardrikCore.evaluate/4`. A refused call returns the refusal as its error, so the
+    model can carry on.
 
-    Each decision is set on the step as the `"wardrik.policy.decision"` attribute; see
-    `WardrikCore.Context.attribute/3`. A refused tool call is answered with the refusal as its error,
-    so the model can carry on.
+    For each model call, it checks the budgets before the call and counts the cost after.
+    What was spent is kept in the context's private data, so it survives restarts.
 
-    Every decision emits `[:wardrik_policy, :decision]`, and every answer emits
-    `[:wardrik_policy, :answer]`, through `WardrikCore.Event`, so they reach the agent's events
-    sink as well as `:telemetry`. Both carry the `agent_id`, the step's `span`, the `call`, which
-    is `nil` for a model call, and the `labels` of what the run had read; see
-    `WardrikCore.Context.labels/1`. An answer carries the `metadata` given to `WardrikCore.resume/3`, like
-    who answered.
+    ## Answering an ask
 
-    It also emits `[:wardrik, :tool_call, :denied]` and `[:wardrik, :interrupt, :resolved]`.
+    A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/2`, keyed
+    by the tool call's id, or `"model"` for a model call:
 
-    Reach for this when an agent's tools can spend money, send mail, or change anything you'd want
-    a say in.
+        WardrikCore.resume(agent, %{"call_123" => :approve})
+        WardrikCore.resume(agent, %{"call_123" => {:approve, "Checked with finance."}})
+        WardrikCore.resume(agent, %{"model" => {:deny, "Over budget for today."}})
+
+    A note reaches the model beside the call's result. A reason reaches it as the call's error.
+    Pass `%{by: who}` as `WardrikCore.resume/3`'s metadata to record who answered.
+
+    A call parked `:in_doubt`, because it may already have run, takes the answer given for that.
+    The person isn't asked twice.
+
+    ## Events
+
+    Each decision is set on the step's span as the `"wardrik.policy.decision"` attribute. See
+    `WardrikCore.Context.attribute/3`.
+
+    These events go through `WardrikCore.Event`, so they reach the agent's events sink and
+    `:telemetry`:
+
+      * `[:wardrik_policy, :decision]` - every decision.
+      * `[:wardrik_policy, :answer]` - every answer. Carries the `metadata` given to
+        `WardrikCore.resume/3`.
+      * `[:wardrik, :tool_call, :denied]` - a tool call refused by a policy or a person.
+      * `[:wardrik, :interrupt, :resolved]` - an ask answered.
+
+    The first two carry `agent_id`, the step's `span`, the `call` (`nil` for a model call) and the
+    run's `labels`. See `WardrikCore.Context.labels/1`.
     """
     @behaviour WardrikCore.Middleware
 

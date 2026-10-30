@@ -1,12 +1,21 @@
 defmodule WardrikPolicy.Decision do
   @moduledoc """
-  A decision is what a policy said about a call, and its cause.
+  What a policy decided about a call, and why. Returned by `WardrikPolicy.explain/3`.
 
-  `policy` names the policy that decided, when it has a name. The cause is `:rule` when a rule
-  named the call, and `rule` holds that rule. It's `:no_rule` when no rule covered the whole call,
-  so the policy's `default:` decided. It's `:judge` when the policy's judge decided, and
-  `:budget` when a model call reached the policy's budget. It's `:label` when a rule allowed a gated
-  call, but its run had read what a label marks, such as content from outside.
+    * `:effect` - `:allow`, `:ask` or `:deny`.
+    * `:message` - the prompt or refusal. `nil` for an allow.
+    * `:rule` - the rule that decided, when `:cause` is `:rule` or `:label`.
+    * `:policy` - the name of the policy that decided, if it has one.
+    * `:cause` - what decided. See below.
+    * `:measurements` - what a judge's model call used.
+
+  The `:cause` is one of:
+
+    * `:rule` - a rule named the call.
+    * `:no_rule` - no rule covered the whole call, so `default` decided.
+    * `:judge` - the policy's judge decided.
+    * `:budget` - a model call reached the policy's budget.
+    * `:label` - a rule allowed a gated call, but the run had read labelled content.
   """
 
   @enforce_keys [:effect, :cause]
@@ -22,10 +31,10 @@ defmodule WardrikPolicy.Decision do
         }
 
   @doc """
-  Picks the strictest decision. A deny beats an ask, and an ask beats an allow. Between two the
-  same, one a rule or judge named beats one a default made. No decisions allow.
+  Returns the strictest decision. A deny beats an ask, and an ask beats an allow.
 
-  The decision it picks carries what all of them measured.
+  On a tie, a decision from a rule or judge beats one from a default. An empty list allows. The
+  result carries the summed measurements of all of them.
   """
   @spec strictest([t()]) :: t()
   def strictest([]), do: %__MODULE__{effect: :allow, cause: :no_rule}
@@ -33,7 +42,7 @@ defmodule WardrikPolicy.Decision do
   def strictest(decisions),
     do: %{Enum.min_by(decisions, &rank/1) | measurements: measured(decisions)}
 
-  @doc "Ranks an effect from strictest, `:deny`, to least strict, `:allow`."
+  @doc "Ranks an effect: `0` for `:deny`, `1` for `:ask`, `2` for `:allow`."
   @spec strictness(:allow | :ask | :deny) :: 0..2
   def strictness(:deny), do: 0
   def strictness(:ask), do: 1

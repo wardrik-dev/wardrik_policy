@@ -1,7 +1,10 @@
 defmodule WardrikPolicy.Ask do
   @moduledoc """
-  An ask is the question a person answers before a call can run, with the labels of what its run
-  had read, which may be what asked for the call.
+  The question a person answers before a call can run. `WardrikPolicy.Middleware` parks on it.
+
+    * `:interrupt` - `"tool_approval"` or `"model_approval"`.
+    * `:message` - the prompt for the person.
+    * `:labels` - labels for what the run had read, which may be what asked for the call.
   """
 
   @enforce_keys [:interrupt, :message]

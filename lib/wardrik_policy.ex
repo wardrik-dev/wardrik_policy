@@ -1,6 +1,6 @@
 defmodule WardrikPolicy do
   @moduledoc """
-  A policy decides each tool call an agent makes. It runs the call, asks a person first, or refuses it.
+  Decides each tool call an agent makes: run it, ask a person first, or refuse it.
 
       iex> policy =
       ...>   WardrikPolicy.new!(
@@ -22,10 +22,33 @@ defmodule WardrikPolicy do
         cause: :rule
       }
 
-  The strictest rule wins. A deny beats an ask, and an ask beats an allow.
+  The strictest rule wins: deny, then ask, then allow.
 
-  A rule can also name what a call acts on, like a file's path. A call no rule names follows the
-  `default`, which can turn on the tool's annotations, like `read_only`:
+  ## Rules
+
+    * `:allow` - tool patterns that run.
+    * `:ask` - tool patterns that wait for a person. A map of pattern to message sets the prompt.
+    * `:deny` - tool patterns that are refused. A map of pattern to message sets the refusal.
+    * `:allow_after` - a map of label to patterns that stay allowed after the run reads content
+      with that label. See "Content from outside" below.
+    * `:default` - what a call no rule names gets: `:allow`, `:ask`, `:deny`, or a map by
+      annotation. `:allow` unless set.
+    * `:budget` - caps what the agent spends on model calls. See `WardrikPolicy.Budget`.
+    * `:judge` - asks a model about each call. See `WardrikPolicy.Judge`.
+
+  A pattern names a tool, what the call acts on, or its arguments:
+
+      "web_search"                            # one tool
+      "github/*"                              # every tool from the github MCP server
+      "write_file(notes/*)"                   # what the call acts on, given as :resources
+      "books/create_bill(amount >= 1000)"     # an argument; =, !=, >, >=, < and <=
+      "email/send(to != *@acme.com)"          # a comma means all conditions must hold
+
+  An MCP tool named `github__create_issue` also matches as `github/create_issue`.
+
+  ## Defaults by annotation
+
+  A call no rule names follows `:default`. The default can depend on the tool's annotations:
 
       iex> policy =
       ...>   WardrikPolicy.new!(
@@ -39,7 +62,12 @@ defmodule WardrikPolicy do
       iex> WardrikPolicy.decide(policy, "read_file", annotations: %{read_only: true})
       :allow
 
-  Policy files work the same way. Parse the YAML into a map first:
+  When a tool has several annotations, the strictest wins. `else` covers a tool with none of them,
+  and is `:allow` unless set.
+
+  ## Policy files
+
+  Parse the YAML into a map, then call `decode/2`:
 
       iex> {:ok, policy} =
       ...>   WardrikPolicy.decode(%{"deny" => ["email/send(to != *@acme.com)"], "default" => "ask"})
@@ -48,10 +76,12 @@ defmodule WardrikPolicy do
       iex> WardrikPolicy.decide(policy, "web_search")
       {:ask, "web_search needs your approval."}
 
-  Once a run has read content from outside, such as a web page or a search result, a gated tool's
-  call waits for a person however the rules allow it, since what the run read may be what asked for
-  it. Pass the run's labels as `:labels`. `allow_after` allows a call by name as `allow` does, and
-  holds after its label too, for tools a stranger can't misuse:
+  ## Content from outside
+
+  A run that has read content from outside, such as a web page, may have been told what to call.
+  So once a run carries the `"outside"` label, a call to a gated tool asks a person, even if a rule
+  allows it. Pass the run's labels as `:labels`. `allow_after` keeps a call allowed for tools a
+  stranger can't misuse:
 
       iex> policy =
       ...>   WardrikPolicy.new!(
@@ -64,12 +94,8 @@ defmodule WardrikPolicy do
       iex> WardrikPolicy.decide(policy, "github__add_labels", annotations: gated, labels: ["outside"])
       :allow
 
-  A label `allow_after` names holds gated calls the way `outside` does. One no rule names holds
-  nothing.
-
-  A policy can hold a budget too, which caps what the agent spends on model calls. See
-  `WardrikPolicy.Budget`. And a judge, which asks a model about each call. See
-  `WardrikPolicy.Judge`.
+  A tool is gated when its annotations include `gated: true`. Any label that `allow_after` names
+  holds gated calls the same way `"outside"` does. Other labels hold nothing.
   """
 
   alias WardrikPolicy.Budget
@@ -95,8 +121,15 @@ defmodule WardrikPolicy do
   @keys ~w(allow allow_after ask deny default budget judge)
 
   @doc """
-  Builds a policy from a keyword list or map of rules, a `budget:` and a `judge:`. See
-  `WardrikPolicy.Budget` and `WardrikPolicy.Judge`. Raises if a rule doesn't read. Takes a `:name`.
+  Builds a policy from a keyword list or map. See the module docs for the keys.
+
+      WardrikPolicy.new!([deny: ["shell/*"], budget: [usd: 5.00]], name: "acme")
+
+  Raises `ArgumentError` if a rule can't be parsed.
+
+  ## Options
+
+    * `:name` - names the policy in each `WardrikPolicy.Decision`. `nil` unless set.
   """
   @spec new!(keyword() | map(), keyword()) :: t()
   def new!(fields, opts \\ []) do
@@ -110,7 +143,12 @@ defmodule WardrikPolicy do
     end
   end
 
-  @doc "Reads a policy from a map with string keys, like one parsed from a YAML file. Takes a `:name`."
+  @doc """
+  Reads a policy from a map with string keys, such as one parsed from YAML.
+
+  Returns `{:error, message}` for an unknown key or a rule that can't be parsed. Takes the same
+  options as `new!/2`.
+  """
   @spec decode(map(), keyword()) :: {:ok, t()} | {:error, String.t()}
   def decode(fields, opts \\ [])
 
@@ -139,19 +177,25 @@ defmodule WardrikPolicy do
   @doc """
   Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`.
 
-  Pass the call's `:arguments`, the `:resources` it acts on, the tool's `:annotations`, like
-  `%{read_only: true}`, and the `:labels` of what its run has read. A policy with a judge asks its model through `:evaluate`; see
-  `t:WardrikPolicy.Judge.evaluate/0`.
+  Given a list of policies, the strictest decision wins.
+
+  ## Options
+
+    * `:arguments` - the call's arguments, as a map with string keys. `%{}` unless set.
+    * `:resources` - what the call acts on, such as file paths. `[]` unless set.
+    * `:annotations` - the tool's annotations, as `%{read_only: true}`. `%{}` unless set.
+    * `:labels` - labels for what the run has read, as `["outside"]`. `[]` unless set.
+    * `:evaluate` - asks a judge's model. See `t:WardrikPolicy.Judge.evaluate/0`.
   """
   @spec decide(t() | [t()], String.t(), keyword()) :: decision()
   def decide(policies, name, opts \\ []),
     do: policies |> explain(name, opts) |> Decision.outcome()
 
   @doc """
-  Like `decide/3`, but returns a `WardrikPolicy.Decision`, so you can see which rule decided.
+  Decides a call like `decide/3`, but returns a `WardrikPolicy.Decision` that says what decided.
 
-  Give it a list of policies and the strictest decision wins. If any policy denies the call, it's
-  denied. If any asks, it asks.
+  Given a list of policies, the strictest decision wins. If any policy denies the call, it's
+  denied. Otherwise, if any asks, it asks.
   """
   @spec explain(t() | [t()], String.t(), keyword()) :: Decision.t()
   def explain(policies, name, opts \\ []) do

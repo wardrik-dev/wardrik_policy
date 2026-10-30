@@ -1,49 +1,16 @@
 # WardrikPolicy
 
-Budgets that cap what an agent spends, and rules and judges that decide every tool call it makes.
+Rules, judges and budgets that decide what an agent may do and spend.
 
 ## Install
 
 ```elixir
 def deps do
   [
-    {:wardrik_policy, "~> 0.1"}
+    {:wardrik_policy, "~> 0.1.0-rc.1"}
   ]
 end
 ```
-
-## Cap what an agent spends
-
-```elixir
-policy = WardrikPolicy.new!(budget: [usd: 5.00, per: :day])
-
-WardrikPolicy.Budget.check(policy.budget, %{usd: 5.02})
-#=> {:ask, "This agent has spent $5.02 of $5.00 today. Approve to allow $5.00 more."}
-```
-
-Check the budget before each model call, against what the calls before it spent. The call that
-crosses the limit runs, and the next one asks. Approving it allows another `grant`'s worth.
-
-| Key | Takes | Unless set |
-| --- | --- | --- |
-| `usd` | a limit in US dollars | no dollar limit |
-| `tokens` | a limit in tokens, input and output together | no token limit |
-| `per` | `:turn`, `:day`, `:week`, `:month` or `:total` | `:day` |
-| `timezone` | where a day, week or month begins, as `"Europe/Berlin"` | `"Etc/UTC"` |
-| `grant` | how much more an approval allows, as `[usd: 2.00]` | another limit |
-| `price` | dollars per million tokens, as `[input: 0.60, output: 2.20]` | the cost the model reports |
-| `on_exhausted` | `:ask` a person, or `:deny` | `:ask` |
-
-Days, weeks and months begin at midnight UTC, and weeks begin on Monday. To count them where your
-people are, give the budget a `timezone`:
-
-```elixir
-WardrikPolicy.new!(budget: [usd: 5.00, per: :day, timezone: "Europe/Berlin"])
-```
-
-Keep what was spent yourself, or let `WardrikPolicy.Middleware` keep it for you. Start it over when
-`WardrikPolicy.Budget.period/2` changes, and pass it through `WardrikPolicy.Budget.grant/2` when a
-person approves.
 
 ## Decide a call
 
@@ -59,7 +26,7 @@ WardrikPolicy.decide(policy, "books__create_bill", arguments: %{"amount" => 9400
 #=> {:ask, "A bill this size needs a person."}
 ```
 
-Notice the rules live outside the prompt. Nothing the model reads can widen them.
+The rules live outside the prompt, so nothing the model reads can widen them.
 
 | The model asks for | The rule that names it | What happens |
 | --- | --- | --- |
@@ -71,19 +38,25 @@ Notice the rules live outside the prompt. Nothing the model reads can widen them
 The strictest rule wins: deny, then ask, then allow. A call no rule names follows `default:`, which
 is `:allow` unless set.
 
+To see which rule decided, call `WardrikPolicy.explain/3`. It returns a `WardrikPolicy.Decision`.
+
 ## Rules
 
-- **By tool**: `web_search`, `github/*`. An MCP server's tool `github__create_issue` matches as
-  `github/create_issue` too.
-- **By what a call acts on**: `write_file(notes/*)`. Pass what it acts on as `decide/3`'s
-  `resources:`.
-- **By arguments**: `books/create_bill(amount >= 1000)`, `email/send(to != *@acme.com)`, using `=`,
-  `!=`, `>`, `>=`, `<` and `<=`. A comma means all must hold.
+```elixir
+"web_search"                         # a tool
+"github/*"                           # every tool from the github MCP server
+"write_file(notes/*)"                # what the call acts on
+"books/create_bill(amount >= 1000)"  # an argument
+"email/send(to != *@acme.com)"       # a comma means all conditions must hold
+```
+
+- An MCP tool named `github__create_issue` also matches as `github/create_issue`.
+- Pass what a call acts on as `decide/3`'s `resources:`.
+- Conditions use `=`, `!=`, `>`, `>=`, `<` and `<=`.
 
 ## Decide what no rule names
 
-A tool says what it is with annotations, like `read_only: true`. A call no rule names follows the
-`default`, and the default can turn on those annotations:
+A tool describes itself with annotations, like `read_only: true`. The `default` can depend on them:
 
 ```elixir
 policy =
@@ -98,20 +71,32 @@ WardrikPolicy.decide(policy, "github__close_issue")
 #=> {:ask, "github/close_issue needs your approval."}
 ```
 
-`github/create_issue` runs, because a rule names it. A tool that isn't marked read-only asks, and
-one marked destructive is refused. When a tool has several annotations, the strictest wins. `else`
-covers a tool with none of them, and allows unless set.
+- `github/create_issue` runs, because a rule names it.
+- A tool marked destructive is refused.
+- When a tool has several annotations, the strictest wins.
+- `else` covers a tool with none of them. It is `:allow` unless set.
 
-A default speaks for its own policy only. An agent's own allow can't lift its org's `else: ask`.
+A default applies to its own policy only. An agent's own allow can't lift its org's `else: :ask`.
 
-`WardrikPolicy.decode/2` reads the same policy from a map with string keys, as a YAML file writes
-it, its `budget` and `judge` included.
+## Policy files
+
+`WardrikPolicy.decode/2` reads a policy from a map with string keys, such as one parsed from YAML.
+It reads `budget` and `judge` too.
+
+```yaml
+allow: [web_search]
+deny: ["email/send(to != *@acme.com)"]
+default: ask
+budget:
+  usd: 5.00
+  per: day
+```
 
 ## After content from outside
 
-A run carries labels for what it has read; see `WardrikCore.Context.labels/1`. Once it has read
-content from outside, such as a web page or an issue a stranger filed, a gated tool's call waits for
-a person however the rules allow it, since what it read may be what asked for the call:
+A run that has read content from outside, such as a web page or an issue a stranger filed, may have
+been told what to call. Once a run has the `"outside"` label, a call to a gated tool asks a person,
+even if a rule allows it. See `WardrikCore.Context.labels/1`.
 
 ```elixir
 policy =
@@ -127,15 +112,16 @@ WardrikPolicy.decide(policy, "linear__create_issue",
 #=> {:ask, "linear/create_issue is allowed, but this run has read content from outside, which may be what asked for it."}
 ```
 
-A tool is gated when its annotations say `gated: true`. `allow_after` allows a call by name as
-`allow` does, and holds after its label too, for tools a stranger can't misuse. An ask or deny still
-wins over it. A label `allow_after` names holds gated calls the way `outside` does, and one no rule
-names holds nothing. A judge's allow holds only while the run has read nothing from outside.
+- A tool is gated when its annotations include `gated: true`.
+- `allow_after` keeps a call allowed after that label. Use it for tools a stranger can't misuse.
+- An ask or deny still wins over `allow_after`.
+- Any label `allow_after` names holds gated calls the same way `"outside"` does.
+- A judge's allow is ignored once the run has read content from outside.
 
 ## Judge a call
 
-Some decisions turn on what a call means, not its name. A judge asks a model yes-or-no questions
-about each call, and decides by the probability of yes:
+Some decisions depend on what a call means, not its name. A judge asks a model yes-or-no
+questions about each call, and decides by the probability of yes:
 
 ```elixir
 policy =
@@ -164,29 +150,57 @@ takes:
 
 | Key | Takes | Unless set |
 | --- | --- | --- |
-| `question` | what the model is asked about the call | |
-| `tools` | the tools it's asked about, as `["books/*"]` | every tool |
+| `question` | what the model is asked about the call | required |
+| `tools` | tool names it applies to, as `["books/*"]`, without arguments | every tool |
 | `deny` | refuse the call at or above this probability | |
-| `ask` | ask a person first at or above this probability | |
-| `allow` | allow the call by name below this probability | |
-| `message` | what the person is asked, or the model told, in place of the question | |
+| `ask` | ask a person at or above this probability | |
+| `allow` | allow the call below this probability | |
+| `message` | the prompt or refusal to show in place of the question | |
 
-A question needs at least one of `deny`, `ask` and `allow`, each a probability from 0 to 1, or it
-decides nothing and the policy is refused. Its `tools` are names alone, without arguments.
+A question needs at least one of `deny`, `ask` and `allow`, each from 0 to 1.
 
-`evaluate:` is the function that asks the model. It gives back each question's probability of yes,
-and what the call used, which the decision carries as `measurements`.
+`evaluate:` is the function that asks the model. It returns each question's probability of yes and
+what the request used. The decision carries that as `measurements`.
 
-A deny beats an ask, and an ask beats an allow, across the questions and the rules. A judge's
-allow never lifts a call a rule asks about or denies. A judge that can't answer asks a person if
-any of its questions could ask or deny.
+- A deny beats an ask, and an ask beats an allow, across questions and rules.
+- A judge's allow never overrides a rule's ask or deny.
+- If the model can't answer, the call asks a person, as long as some question could ask or deny.
 
-A call's arguments may be written to fool the judge. Keep exact matters in rules, and try a judge's
-thresholds on real calls before you trust its allow.
+The call's arguments may be written to fool the judge. Keep exact checks in rules, and test the
+thresholds on real calls before trusting the judge's allow.
+
+## Cap what an agent spends
+
+```elixir
+policy = WardrikPolicy.new!(budget: [usd: 5.00, per: :day])
+
+WardrikPolicy.Budget.check(policy.budget, %{usd: 5.02})
+#=> {:ask, "This agent has spent $5.02 of $5.00 today. Approve to allow $5.00 more."}
+```
+
+Check the budget before each model call, with what the earlier calls spent. The call that crosses
+the limit still runs. The next one asks. Approving allows another `grant`'s worth.
+
+| Key | Takes | Unless set |
+| --- | --- | --- |
+| `usd` | a limit in US dollars | no dollar limit |
+| `tokens` | a limit in tokens, input and output together | no token limit |
+| `per` | `:turn`, `:day`, `:week`, `:month` or `:total` | `:day` |
+| `timezone` | where a day, week or month begins, as `"Europe/Berlin"` | `"Etc/UTC"` |
+| `grant` | how much more an approval allows, as `[usd: 2.00]` | another limit |
+| `price` | dollars per million tokens, as `[input: 0.60, output: 2.20]` | the cost the model reports |
+| `on_exhausted` | `:ask` a person, or `:deny` | `:ask` |
+
+Weeks begin on Monday.
+
+`WardrikPolicy.Middleware` keeps track of spending for you. To do it yourself:
+
+1. Reset what was spent when `WardrikPolicy.Budget.period/2` returns a new period.
+2. Pass it through `WardrikPolicy.Budget.grant/2` when a person approves.
 
 ## Several policies
 
-Hold an agent to an org's policy and its own by giving `decide/3` a list. The strictest decision
+Pass a list to `decide/3` to hold an agent to its org's policy and its own. The strictest decision
 wins, so an agent's own policy can add caution but never remove it:
 
 ```yaml
@@ -199,8 +213,8 @@ deny: [shell/*]
 allow: [shell/*, books/*]
 ```
 
-`shell/exec` is refused here, even though the agent's policy allows it. If any policy denies a call,
-it's denied. If any asks, it asks. Each policy's budget counts apart.
+`shell/exec` is refused, even though the agent's policy allows it. Each policy's budget is counted
+separately.
 
 ## With WardrikCore
 
@@ -215,19 +229,26 @@ WardrikCore.start_agent(
 )
 ```
 
-What the agent spent stays with it through restarts. A judge asks its model with
-`WardrikCore.evaluate/4`, and what that costs counts against the budget too.
+- What the agent spent survives restarts.
+- A judge asks its model with `WardrikCore.evaluate/4`. That cost counts against the budget too.
+- A dollar budget needs the model's price. If the model reports no dollar cost, as with a
+  subscription, model calls are refused after the first one. Set the budget's `price`, or cap
+  `tokens` instead.
 
-A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/2`, giving each
-tool call's id, or `"model"` for a model call, `:approve`, `{:approve, note}` or `{:deny, reason}`.
-The ask carries the run's labels, and so does every decision event. A note reaches the model beside the call's result. A reason reaches it as the call's error. To
-record who answered, pass it as `WardrikCore.resume/3`'s metadata.
+A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/3`, keyed by
+the tool call's id, or `"model"` for a model call:
 
-A dollar budget needs the model's price. A model with no price in dollars, like one a subscription
-pays for, is refused after its first call. Give the budget a `price`, or cap it in `tokens` instead.
+```elixir
+WardrikCore.resume(agent, %{"call_123" => :approve}, %{by: "maria"})
+WardrikCore.resume(agent, %{"call_123" => {:approve, "Checked with finance."}})
+WardrikCore.resume(agent, %{"model" => {:deny, "Over budget for today."}})
+```
 
-The middleware reads each tool's annotations from `WardrikCore.Tool`. A tool's `resources`
-annotation says what a call acts on, as a function of its arguments:
+A note reaches the model beside the call's result. A reason reaches it as the call's error. The
+metadata records who answered.
+
+The middleware reads each tool's annotations from `WardrikCore.Tool`. The `resources` annotation
+returns what a call acts on, from its arguments:
 
 ```elixir
 WardrikCore.Tool.new!(
@@ -239,9 +260,8 @@ WardrikCore.Tool.new!(
 )
 ```
 
-Every decision and every answer is a telemetry event, and each decision is set on its step's span.
-That's the record of what the agent was allowed to do, and who said so; see
-`WardrikPolicy.Middleware`.
+Every decision and answer is a telemetry event, and each decision is set on its step's span. That
+is the record of what the agent was allowed to do, and who said so. See `WardrikPolicy.Middleware`.
 
 ## License
 

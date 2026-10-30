@@ -1,7 +1,6 @@
 defmodule WardrikPolicy.Judge do
   @moduledoc """
-  A judge asks a model yes-or-no questions about each tool call, and decides by the probability of
-  yes.
+  Asks a model yes-or-no questions about each tool call, and decides by the probability of yes.
 
       iex> policy =
       ...>   WardrikPolicy.new!(
@@ -20,27 +19,39 @@ defmodule WardrikPolicy.Judge do
       iex> WardrikPolicy.decide(policy, "books__pay_bill", evaluate: evaluate)
       {:ask, "Judged 72% likely: Does this call send money outside the company?"}
 
+  ## Options
+
+    * `:model` - the model that answers. `"typesafe:jev-latest"` unless set.
+    * `:questions` - a list of questions, each with the keys below.
+
   Each question takes:
 
-    * `question` - what the model is asked about the call.
-    * `tools` - the tools it's asked about, as `["books/*"]`. Every tool unless set.
-    * `deny` - refuse the call at or above this probability.
-    * `ask` - ask a person first at or above this probability.
-    * `allow` - allow the call by name below this probability.
-    * `message` - what the person is asked, or the model told, in place of the question.
+    * `:question` - required. What the model is asked about the call.
+    * `:tools` - tool names it applies to, as `["books/*"]`, without arguments. Every tool unless set.
+    * `:deny` - refuse the call at or above this probability.
+    * `:ask` - ask a person at or above this probability.
+    * `:allow` - allow the call below this probability.
+    * `:message` - the prompt or refusal to show in place of the question.
 
-  The questions a call is asked go to `model` together, with the tool's name and arguments. The
-  `evaluate:` option of `WardrikPolicy.decide/3` makes that call, and gives back what it used. The
-  decision carries that as its `measurements`. `WardrikPolicy.Middleware` makes
-  it with `WardrikCore.evaluate/4`.
+  Each threshold is a probability from 0 to 1. A question needs at least one of them.
+  `decode/1` returns an error otherwise.
 
-  A deny beats an ask, and an ask beats an allow, across the questions and the rules. A judge's
-  allow never lifts a call a rule asks about or denies, and holds only while the call's run has read
-  nothing from outside. A judge that can't answer asks a person if
-  any of its questions could ask or deny.
+  ## Evaluating
 
-  Its allow trusts the call's arguments, and they may be written to fool it. Reach for it as a
-  second opinion beside the rules, and try its thresholds on real calls before trusting them.
+  A call's questions go to the model in one request, with the tool's name and arguments. Pass a
+  function as the `:evaluate` option of `WardrikPolicy.decide/3` to make that request. See
+  `t:evaluate/0`. `WardrikPolicy.Middleware` uses `WardrikCore.evaluate/4`. What the request used
+  is returned in the decision's `measurements`.
+
+  ## How it combines with rules
+
+    * A deny beats an ask, and an ask beats an allow, across questions and rules.
+    * A judge's allow only decides calls no rule names. It never overrides a rule's ask or deny.
+    * A judge's allow is ignored once the run has read content from outside.
+    * If the model can't answer, the call asks a person, as long as some question could ask or deny.
+
+  The call's arguments may be written to fool the judge. Keep exact checks in rules, and test the
+  thresholds on real calls before trusting the judge's allow.
   """
 
   alias WardrikPolicy.Call
@@ -73,12 +84,15 @@ defmodule WardrikPolicy.Judge do
         }
   @type t() :: %__MODULE__{model: String.t(), questions: [question() | keyword()]}
 
-  @typedoc "Asks `model` each question about `state`, and gives each one's probability of yes."
+  @typedoc """
+  Asks `model` each question about `state`. Returns each question's probability of yes, in order,
+  and what the request used.
+  """
   @type evaluate() ::
           (model :: String.t(), state :: map(), questions :: [String.t()] ->
              {:ok, [float()], measurements :: map()} | {:error, term()})
 
-  @doc "Reads a judge from a map with string keys, as a YAML file writes it."
+  @doc "Reads a judge from a map with string keys, such as one parsed from YAML."
   @spec decode(map()) :: {:ok, t()} | {:error, String.t()}
   def decode(fields) when is_map(fields) do
     with :ok <- Read.known(fields, @fields, "a judge"),
@@ -133,8 +147,10 @@ defmodule WardrikPolicy.Judge do
   end
 
   @doc """
-  Decides a call to the tool `name`. Returns `:allow`, `{:ask, prompt}`, `{:deny, message}`, or
-  `:pass` when it has nothing to say.
+  Decides a call to the tool `name` by the judge alone.
+
+  Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`. Returns `:pass` when no question applies
+  or none crosses its threshold.
   """
   @spec decide(t(), String.t(), map(), evaluate() | nil) :: WardrikPolicy.decision() | :pass
   def decide(%__MODULE__{} = judge, name, arguments, evaluate) do
