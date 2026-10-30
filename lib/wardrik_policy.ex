@@ -125,7 +125,8 @@ defmodule WardrikPolicy do
 
       WardrikPolicy.new!([deny: ["shell/*"], budget: [usd: 5.00]], name: "acme")
 
-  Raises `ArgumentError` if a rule can't be parsed.
+  Raises `ArgumentError` with the message `decode/2` would return if a rule, budget or judge
+  can't be read.
 
   ## Options
 
@@ -133,12 +134,14 @@ defmodule WardrikPolicy do
   """
   @spec new!(keyword() | map(), keyword()) :: t()
   def new!(fields, opts \\ []) do
-    fields = Map.new(fields, fn {key, value} -> {to_string(key), value} end)
-    {budget, fields} = Map.pop(fields, "budget")
-    {judge, rules} = Map.pop(fields, "judge")
+    fields =
+      fields
+      |> strings()
+      |> Map.replace_lazy("budget", &budget/1)
+      |> Map.replace_lazy("judge", &judge/1)
 
-    case decode(rules, opts) do
-      {:ok, policy} -> %{policy | budget: build(Budget, budget), judge: build(Judge, judge)}
+    case decode(fields, opts) do
+      {:ok, policy} -> policy
       {:error, message} -> raise ArgumentError, message
     end
   end
@@ -225,8 +228,36 @@ defmodule WardrikPolicy do
   defp decoded(_module, nil), do: {:ok, nil}
   defp decoded(module, fields), do: module.decode(fields)
 
-  defp build(_module, nil), do: nil
-  defp build(module, opts), do: struct!(module, opts)
+  defp budget(budget) do
+    budget
+    |> strings()
+    |> Map.new(fn
+      {key, value} when key in ["per", "on_exhausted"] and is_atom(value) and value != nil ->
+        {key, Atom.to_string(value)}
+
+      {key, value} when key in ["grant", "price"] ->
+        {key, strings(value)}
+
+      field ->
+        field
+    end)
+  end
+
+  defp judge(judge) do
+    case strings(judge) do
+      %{"questions" => questions} = judge when is_list(questions) ->
+        %{judge | "questions" => Enum.map(questions, &strings/1)}
+
+      judge ->
+        judge
+    end
+  end
+
+  defp strings(fields) do
+    if (is_map(fields) and not is_struct(fields)) or Keyword.keyword?(fields),
+      do: Map.new(fields, fn {key, value} -> {to_string(key), value} end),
+      else: fields
+  end
 
   defp known_keys(fields) do
     case Map.keys(fields) -- @keys do

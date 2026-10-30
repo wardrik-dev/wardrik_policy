@@ -268,5 +268,43 @@ defmodule WardrikPolicyTest do
         WardrikPolicy.new!(%{"deny" => [%{"books/*(memo" => "x)"}]})
       end
     end
+
+    test "reads a budget and a judge as decode/2 does" do
+      policy =
+        WardrikPolicy.new!(
+          budget: [tokens: 400_000, per: :week, grant: [tokens: 1000], on_exhausted: :deny],
+          judge: [questions: [[question: "Does it send money?", tools: ["books/*"], ask: 0.5]]]
+        )
+
+      assert %WardrikPolicy.Budget{per: :week, grant: [tokens: 1000], on_exhausted: :deny} =
+               policy.budget
+
+      assert [%{question: "Does it send money?", tools: ["books/*"], ask: 0.5}] =
+               policy.judge.questions
+    end
+
+    test "refuses a budget or a judge that decode/2 refuses, with its message" do
+      for {fields, file} <- [
+            {[judge: [questions: [[question: "Publish?"]]]],
+             %{"judge" => %{"questions" => [%{"question" => "Publish?"}]}}},
+            {[
+               judge: [questions: [[question: "Publish?", ask: 0.5, tools: ["publish(posts/*)"]]]]
+             ],
+             %{
+               "judge" => %{
+                 "questions" => [
+                   %{"question" => "Publish?", "ask" => 0.5, "tools" => ["publish(posts/*)"]}
+                 ]
+               }
+             }},
+            {[budget: [usd: 5, per: :fortnight]],
+             %{"budget" => %{"usd" => 5, "per" => "fortnight"}}},
+            {[budget: [cap: 5]], %{"budget" => %{"cap" => 5}}},
+            {[judge: "yes"], %{"judge" => "yes"}}
+          ] do
+        {:error, message} = WardrikPolicy.decode(file)
+        assert_raise ArgumentError, message, fn -> WardrikPolicy.new!(fields) end
+      end
+    end
   end
 end
