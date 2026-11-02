@@ -4,49 +4,35 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
     A `WardrikCore.Middleware` that holds an agent to one or more policies.
 
         middleware: [{WardrikPolicy.Middleware, WardrikPolicy.new!(deny: ["shell/*"])}]
+        middleware: [{WardrikPolicy.Middleware, [app_policy, agent_policy]}]
 
-    Pass a list to hold an agent to several policies, such as its org's and its own:
-
-        middleware: [{WardrikPolicy.Middleware, [org_policy, agent_policy]}]
-
-    For each tool call, it decides by the rules and judge before the call runs. A judge asks its
-    model with `WardrikCore.evaluate/2`. A refused call returns the refusal as its error, so the
-    model can carry on.
-
-    For each model call, it checks the budgets before the call and counts the cost after.
-    What was spent is kept in the context's private data, so it survives restarts.
+      * Decides each tool call by the rules and judge before it runs. A refusal becomes the call's
+        error.
+      * Checks each model call against the budgets, and counts its cost. Spending survives restarts.
 
     ## Answering an ask
 
-    A call that asks parks on a `WardrikPolicy.Ask`. Answer it with `WardrikCore.resume/2`, keyed
-    by the tool call's id, or `"model"` for a model call:
+    A call that asks parks on a `WardrikPolicy.Ask`. Answer by tool call ID, or `"model"`:
 
-        WardrikCore.resume(agent, %{"call_123" => :approve})
+        WardrikCore.resume(agent, %{"call_123" => :approve}, %{by: "user:maria"})
         WardrikCore.resume(agent, %{"call_123" => {:approve, "Checked with finance."}})
         WardrikCore.resume(agent, %{"model" => {:deny, "Over budget for today."}})
 
-    A note reaches the model beside the call's result. A reason reaches it as the call's error.
-    Pass `%{by: who}` as `WardrikCore.resume/3`'s metadata to record who answered.
-
-    A call parked `:in_doubt`, because it may already have run, takes the answer given for that.
-    The person isn't asked twice.
+      * A note reaches the model beside the result. A reason reaches it as the call's error.
+      * An answer to an `:in_doubt` call also answers its ask.
 
     ## Events
 
-    Each decision is set on the step's span as the `"wardrik.policy.decision"` attribute. See
-    `WardrikCore.Context.attribute/3`.
-
-    These events go through `WardrikCore.Event`, so they reach the agent's events sink and
-    `:telemetry`:
+    Each decision is set on the step's span as `"wardrik.policy.decision"`. These go through
+    `WardrikCore.Event`:
 
       * `[:wardrik_policy, :decision]` - every decision.
-      * `[:wardrik_policy, :answer]` - every answer. Carries the `metadata` given to
+      * `[:wardrik_policy, :answer]` - every answer, with the `metadata` given to
         `WardrikCore.resume/3`.
       * `[:wardrik, :tool_call, :denied]` - a tool call refused by a policy or a person.
       * `[:wardrik, :interrupt, :resolved]` - an ask answered.
 
-    The first two carry `agent_id`, the step's `span`, the `call` (`nil` for a model call) and the
-    run's `labels`. See `WardrikCore.Context.labels/1`.
+    The first two carry `agent_id`, `span`, `call` (`nil` for a model call) and `labels`.
     """
     @behaviour WardrikCore.Middleware
 

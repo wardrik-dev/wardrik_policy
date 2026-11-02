@@ -21,37 +21,25 @@ defmodule WardrikPolicy.Judge do
 
   ## Options
 
-    * `:model` - the model that answers. `"typesafe:jev-latest"` unless set.
-    * `:questions` - a list of questions, each with the keys below.
+    * `:model` - the model that answers. `"typesafe:jev-latest"` by default.
+    * `:questions` - a list of questions, each with:
+      * `:question` - required. What the model is asked.
+      * `:tools` - tool patterns it applies to, without arguments. Every tool by default.
+      * `:deny` - refuse at or above this probability.
+      * `:ask` - ask a person at or above this probability.
+      * `:allow` - allow below this probability.
+      * `:message` - the prompt or refusal, in place of the question.
 
-  Each question takes:
+      A question needs at least one of `:deny`, `:ask` and `:allow`, each from 0 to 1.
 
-    * `:question` - required. What the model is asked about the call.
-    * `:tools` - tool names it applies to, as `["books/*"]`, without arguments. Every tool unless set.
-    * `:deny` - refuse the call at or above this probability.
-    * `:ask` - ask a person at or above this probability.
-    * `:allow` - allow the call below this probability.
-    * `:message` - the prompt or refusal to show in place of the question.
+  ## Rules
 
-  Each threshold is a probability from 0 to 1. A question needs at least one of them.
-  `decode/1` returns an error otherwise.
-
-  ## Evaluating
-
-  A call's questions go to the model in one request, with the tool's name and arguments. Pass a
-  function as the `:evaluate` option of `WardrikPolicy.decide/3` to make that request. See
-  `t:evaluate/0`. `WardrikPolicy.Middleware` uses `WardrikCore.evaluate/2`. What the request used
-  is returned in the decision's `measurements`.
-
-  ## How it combines with rules
-
+    * `WardrikPolicy.decide/3` takes the function that asks the model as `:evaluate`.
+      `WardrikPolicy.Middleware` uses `WardrikCore.evaluate/2`.
     * A deny beats an ask, and an ask beats an allow, across questions and rules.
-    * A judge's allow only decides calls no rule names. It never overrides a rule's ask or deny.
-    * A judge's allow is ignored once the run has read content from outside.
-    * If the model can't answer, the call asks a person, as long as some question could ask or deny.
-
-  The call's arguments may be written to fool the judge. Keep exact checks in rules, and test the
-  thresholds on real calls before trusting the judge's allow.
+    * A judge's allow only decides calls no rule names, and never after content from outside.
+    * If the model can't answer, the call asks a person, when some question could ask or deny.
+    * Arguments can be written to fool a judge. Keep exact checks in rules.
   """
 
   alias WardrikPolicy.Call
@@ -159,12 +147,11 @@ defmodule WardrikPolicy.Judge do
         evaluate: evaluate
       )
 
-  Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`. Returns `:pass` when no question applies
-  or none crosses its threshold.
+  Returns `:allow`, `{:ask, prompt}`, `{:deny, message}`, or `:pass` when no question decides.
 
   ## Options
 
-    * `:arguments` - the call's arguments, as a map with string keys. `%{}` unless set.
+    * `:arguments` - the call's arguments, with string keys. `%{}` by default.
     * `:evaluate` - asks the judge's model. See `t:evaluate/0`.
   """
   @spec decide(t(), String.t(), keyword()) :: WardrikPolicy.decision() | :pass

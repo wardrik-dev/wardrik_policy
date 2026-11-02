@@ -4,18 +4,15 @@ defmodule WardrikPolicy.Decision do
 
     * `:effect` - `:allow`, `:ask` or `:deny`.
     * `:message` - the prompt or refusal. `nil` for an allow.
-    * `:rule` - the rule that decided, when `:cause` is `:rule` or `:label`.
-    * `:policy` - the name of the policy that decided, if it has one.
-    * `:cause` - what decided. See below.
+    * `:rule` - the rule that decided, for a `:rule` or `:label` cause.
+    * `:policy` - the deciding policy's name.
     * `:measurements` - what a judge's model call used.
-
-  The `:cause` is one of:
-
-    * `:rule` - a rule named the call.
-    * `:no_rule` - no rule covered the whole call, so `default` decided.
-    * `:judge` - the policy's judge decided.
-    * `:budget` - a model call reached the policy's budget.
-    * `:label` - a rule allowed a gated call, but the run had read labelled content.
+    * `:cause` - one of:
+      * `:rule` - a rule named the call.
+      * `:no_rule` - `default` decided.
+      * `:judge` - the judge decided.
+      * `:budget` - a model call reached the budget.
+      * `:label` - a rule allowed a gated call, but the run had read labelled content.
   """
 
   @enforce_keys [:effect, :cause]
@@ -31,10 +28,9 @@ defmodule WardrikPolicy.Decision do
         }
 
   @doc """
-  Returns the strictest decision. A deny beats an ask, and an ask beats an allow.
+  Returns the strictest decision, with all their measurements summed. An empty list allows.
 
-  On a tie, a decision from a rule or judge beats one from a default. An empty list allows. The
-  result carries the summed measurements of all of them.
+  On a tie, a rule or judge beats a default.
   """
   @spec strictest([t()]) :: t()
   def strictest([]), do: %__MODULE__{effect: :allow, cause: :no_rule}

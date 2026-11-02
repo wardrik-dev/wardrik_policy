@@ -8,9 +8,7 @@ defmodule WardrikPolicy.Budget do
       iex> WardrikPolicy.Budget.check(policy.budget, %{usd: 5.02})
       {:ask, "This agent has spent $5.02 of $5.00 today. Approve to allow $5.00 more."}
 
-  Call `check/3` before each model call, with what the earlier calls spent. The call that crosses
-  the limit still runs. The next one asks. `grant/2` records an approval and allows another
-  `grant`'s worth:
+  `grant/2` records an approval:
 
       iex> policy = WardrikPolicy.new!(budget: [tokens: 200_000, grant: [tokens: 50_000]])
       iex> spent = WardrikPolicy.Budget.grant(policy.budget, %{tokens: 201_000})
@@ -19,27 +17,29 @@ defmodule WardrikPolicy.Budget do
       iex> WardrikPolicy.Budget.check(policy.budget, %{spent | tokens: 251_000})
       {:ask, "This agent has used 251,000 of 251,000 tokens today. Approve to allow 50,000 more."}
 
-  `cost/2` prices a call that reports no cost at the budget's `price`, in dollars per million
-  tokens:
+  `cost/2` prices a call that reports no cost:
 
       iex> policy = WardrikPolicy.new!(budget: [usd: 5.00, price: [input: 0.60, output: 2.20]])
       iex> WardrikPolicy.Budget.cost(policy.budget, %{input_tokens: 10_000, output_tokens: 2_000})
       0.0104
 
-  What was spent is a map with `:usd`, `:tokens` and `:granted`. A missing key counts as zero.
-  Reset it when `period/2` returns a new period. `WardrikPolicy.Middleware` does all of this for you.
+    * Check before each model call. The call that crosses the limit still runs.
+    * What was spent is a map of `:usd`, `:tokens` and `:granted`. Reset it when `period/2`
+      changes.
+    * `WardrikPolicy.Middleware` does all of this for you.
 
   ## Options
 
-    * `:usd` - the limit in US dollars. No dollar limit unless set.
-    * `:tokens` - the limit in tokens, input and output together. No token limit unless set.
-    * `:per` - `:turn`, `:day`, `:week`, `:month` or `:total`. `:day` unless set.
-    * `:timezone` - where a day, week or month begins, as `"Europe/Berlin"`. `"Etc/UTC"` unless set.
-      Weeks begin on Monday.
-    * `:grant` - how much more an approval allows, as `[usd: 2.00]`. Another limit's worth unless set.
-    * `:price` - dollars per million tokens, as `[input: 0.60, output: 2.20]`. Used for calls that
-      report no cost.
-    * `:on_exhausted` - `:ask` a person, or `:deny`. `:ask` unless set.
+    * `:usd` - the limit in US dollars.
+    * `:tokens` - the limit in tokens, input and output together.
+    * `:per` - `:turn`, `:day`, `:week`, `:month` or `:total`. `:day` by default.
+    * `:timezone` - where a day, week or month begins. Weeks begin on Monday. `"Etc/UTC"` by
+      default.
+    * `:grant` - how much more an approval allows, as `[usd: 2.00]`. Another limit's worth by
+      default.
+    * `:price` - dollars per million tokens, as `[input: 0.60, output: 2.20]`, for calls that report
+      no cost.
+    * `:on_exhausted` - `:ask` a person, or `:deny`. `:ask` by default.
   """
 
   alias WardrikPolicy.Read
@@ -121,10 +121,8 @@ defmodule WardrikPolicy.Budget do
   end
 
   @doc """
-  Checks what was spent against the budget.
-
-  Returns `:allow` while under every limit. Otherwise returns `{:ask, prompt}` or
-  `{:deny, message}`, as `:on_exhausted` says.
+  Checks what was spent against the budget. Returns `:allow`, or `{:ask, prompt}` or
+  `{:deny, message}` as `:on_exhausted` says.
 
       iex> policy = WardrikPolicy.new!(budget: [usd: 5.00, on_exhausted: :deny])
       iex> WardrikPolicy.Budget.check(policy.budget, %{usd: 5.02}, spender: "acme's agents have")
@@ -132,7 +130,7 @@ defmodule WardrikPolicy.Budget do
 
   ## Options
 
-    * `:spender` - who spent it, at the start of the message. `"This agent has"` unless set.
+    * `:spender` - starts the message. `"This agent has"` by default.
   """
   @spec check(t(), spent(), keyword()) :: WardrikPolicy.decision()
   def check(%__MODULE__{} = budget, spent, opts \\ []) do
@@ -145,10 +143,8 @@ defmodule WardrikPolicy.Budget do
   end
 
   @doc """
-  Returns what a call cost in dollars.
-
-  Uses the call's own `:usd` when it has one. Otherwise prices its `:input_tokens` and
-  `:output_tokens` at the budget's `:price`. Returns `nil` when the budget has no price.
+  Returns what a call cost in dollars: its own `:usd`, or its tokens at the budget's `:price`, or
+  `nil`.
   """
   @spec cost(t(), map()) :: number() | nil
   def cost(_budget, %{usd: usd}) when is_number(usd), do: usd
@@ -160,10 +156,7 @@ defmodule WardrikPolicy.Budget do
     (input + output) / 1_000_000
   end
 
-  @doc """
-  Records an approval. Each limit already reached allows another `:grant`'s worth on top of what
-  was spent.
-  """
+  @doc "Records an approval. Each limit reached allows another `:grant`'s worth."
   @spec grant(t(), spent()) :: spent()
   def grant(%__MODULE__{} = budget, spent) do
     granted =
@@ -179,8 +172,8 @@ defmodule WardrikPolicy.Budget do
   @doc """
   Returns the period `now` falls in. Reset what was spent when it changes.
 
-  Returns `:turn` for a `:turn` budget, so reset it at each turn yourself. Raises `ArgumentError`
-  if `:timezone` isn't a time zone.
+  A `:turn` budget returns `:turn`, so reset it each turn yourself. Raises `ArgumentError` for an
+  unknown `:timezone`.
   """
   @spec period(t(), DateTime.t()) :: period()
   def period(%__MODULE__{per: :turn}, _now), do: :turn

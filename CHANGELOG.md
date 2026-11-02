@@ -1,11 +1,12 @@
 # Changelog
 
-## 0.1.0-rc.2
+## 0.1.0-rc.2 (2026-11-02)
 
 ### Breaking
 
-- `WardrikPolicy.Judge.decide/3` takes the call's `:arguments` and `:evaluate` as options, like
+- `WardrikPolicy.Judge.decide/3` takes `:arguments` and `:evaluate` as options, like
   `WardrikPolicy.decide/3`.
+- `WardrikPolicy.Middleware` requires `wardrik_core` 0.1.0-rc.2.
 
 ## 0.1.0-rc.1 (2026-10-30)
 
