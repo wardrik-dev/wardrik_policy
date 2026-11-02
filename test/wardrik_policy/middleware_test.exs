@@ -236,14 +236,15 @@ defmodule WardrikPolicy.MiddlewareTest do
       %{context: put_in(context.middleware, [{WardrikPolicy.Middleware, policy}])}
     end
 
-    test "asks the model about each call, with WardrikCore.evaluate/4", %{context: context} do
-      expect(WardrikCore, :evaluate, fn _context, "typesafe:jev-latest", state, questions ->
-        assert %{"tool" => "books/create_bill", "arguments" => %{"amount" => 9400}} = state
+    test "asks the model about each call, with WardrikCore.evaluate/2", %{context: context} do
+      expect(WardrikCore, :evaluate, fn _context, args ->
+        assert "typesafe:jev-latest" = args[:model]
+        assert %{"tool" => "books/create_bill", "arguments" => %{"amount" => 9400}} = args[:state]
 
         assert %{
                  "q0" => %{type: :boolean, instructions: "Does it change the books?"},
                  "q1" => %{type: :boolean, instructions: "Does it send money out?"}
-               } = questions
+               } = args[:questions]
 
         {:ok, %{"q0" => %{"probability" => 0.8}, "q1" => %{"probability" => 0.1}}, %{usd: 0.0002}}
       end)
@@ -254,7 +255,7 @@ defmodule WardrikPolicy.MiddlewareTest do
     end
 
     test "a judge with no usable answer asks a person", %{context: context} do
-      expect(WardrikCore, :evaluate, fn _context, _model, _state, _questions ->
+      expect(WardrikCore, :evaluate, fn _context, _args ->
         {:ok, %{}, %{}}
       end)
 

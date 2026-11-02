@@ -10,7 +10,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
         middleware: [{WardrikPolicy.Middleware, [org_policy, agent_policy]}]
 
     For each tool call, it decides by the rules and judge before the call runs. A judge asks its
-    model with `WardrikCore.evaluate/4`. A refused call returns the refusal as its error, so the
+    model with `WardrikCore.evaluate/2`. A refused call returns the refusal as its error, so the
     model can carry on.
 
     For each model call, it checks the budgets before the call and counts the cost after.
@@ -139,7 +139,8 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
         |> Enum.with_index()
         |> Map.new(fn {question, n} -> {"q#{n}", %{type: :boolean, instructions: question}} end)
 
-      with {:ok, answers, measurements} <- WardrikCore.evaluate(context, model, state, named),
+      with {:ok, answers, measurements} <-
+             WardrikCore.evaluate(context, model: model, state: state, questions: named),
            {:ok, probabilities} <- probabilities(answers, length(questions)) do
         {:ok, probabilities, measurements}
       end

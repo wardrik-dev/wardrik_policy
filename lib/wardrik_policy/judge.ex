@@ -40,7 +40,7 @@ defmodule WardrikPolicy.Judge do
 
   A call's questions go to the model in one request, with the tool's name and arguments. Pass a
   function as the `:evaluate` option of `WardrikPolicy.decide/3` to make that request. See
-  `t:evaluate/0`. `WardrikPolicy.Middleware` uses `WardrikCore.evaluate/4`. What the request used
+  `t:evaluate/0`. `WardrikPolicy.Middleware` uses `WardrikCore.evaluate/2`. What the request used
   is returned in the decision's `measurements`.
 
   ## How it combines with rules
@@ -154,14 +154,23 @@ defmodule WardrikPolicy.Judge do
   @doc """
   Decides a call to the tool `name` by the judge alone.
 
+      WardrikPolicy.Judge.decide(judge, "books__pay_bill",
+        arguments: %{"amount" => 120},
+        evaluate: evaluate
+      )
+
   Returns `:allow`, `{:ask, prompt}` or `{:deny, message}`. Returns `:pass` when no question applies
   or none crosses its threshold.
-  """
-  @spec decide(t(), String.t(), map(), evaluate() | nil) :: WardrikPolicy.decision() | :pass
-  def decide(%__MODULE__{} = judge, name, arguments, evaluate) do
-    {answer, _measurements} =
-      judge(judge, Call.new(name, arguments: arguments, evaluate: evaluate))
 
+  ## Options
+
+    * `:arguments` - the call's arguments, as a map with string keys. `%{}` unless set.
+    * `:evaluate` - asks the judge's model. See `t:evaluate/0`.
+  """
+  @spec decide(t(), String.t(), keyword()) :: WardrikPolicy.decision() | :pass
+  def decide(%__MODULE__{} = judge, name, opts \\ []) do
+    opts = Keyword.validate!(opts, arguments: %{}, evaluate: nil)
+    {answer, _measurements} = judge(judge, Call.new(name, opts))
     answer
   end
 

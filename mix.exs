@@ -4,7 +4,7 @@ defmodule WardrikPolicy.MixProject do
   def project do
     [
       app: :wardrik_policy,
-      version: "0.1.0-rc.1",
+      version: "0.1.0-rc.2",
       elixir: "~> 1.20",
       description:
         "Budgets that cap what an agent spends, and rules and judges that decide every tool call it makes.",
@@ -57,7 +57,7 @@ defmodule WardrikPolicy.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      sibling(:wardrik_core, optional: true),
+      sibling(:wardrik_core, "~> 0.1.0-rc.2", optional: true),
       {:telemetry, "~> 1.0", optional: true},
       {:tz, "~> 0.28"},
       {:mimic, "~> 2.4", only: :test},
@@ -73,9 +73,9 @@ defmodule WardrikPolicy.MixProject do
 
   # Wardrik's own packages come from Hex, or from their checkouts beside this one with
   # WARDRIK_LOCAL=1.
-  defp sibling(name, opts) do
+  defp sibling(name, requirement, opts) do
     if System.get_env("WARDRIK_LOCAL"),
       do: {name, Keyword.put(opts, :path, "../#{name}")},
-      else: {name, "~> 0.1.0-rc.1", opts}
+      else: {name, requirement, opts}
   end
 end

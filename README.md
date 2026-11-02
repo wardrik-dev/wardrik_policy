@@ -230,7 +230,7 @@ WardrikCore.start_agent(
 ```
 
 - What the agent spent survives restarts.
-- A judge asks its model with `WardrikCore.evaluate/4`. That cost counts against the budget too.
+- A judge asks its model with `WardrikCore.evaluate/2`. That cost counts against the budget too.
 - A dollar budget needs the model's price. If the model reports no dollar cost, as with a
   subscription, model calls are refused after the first one. Set the budget's `price`, or cap
   `tokens` instead.

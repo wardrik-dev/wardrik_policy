@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-rc.2
+
+### Breaking
+
+- `WardrikPolicy.Judge.decide/3` takes the call's `:arguments` and `:evaluate` as options, like
+  `WardrikPolicy.decide/3`.
+
 ## 0.1.0-rc.1 (2026-10-30)
 
 - Rules that allow, ask about or deny each tool call, by tool, by the resources a call acts on, and
