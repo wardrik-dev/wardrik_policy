@@ -86,6 +86,7 @@ if Code.ensure_loaded?(WardrikCore.Middleware) do
           ask = %Ask{
             interrupt: interrupt(call),
             message: message,
+            call: call,
             labels: Context.labels(context)
           }
 

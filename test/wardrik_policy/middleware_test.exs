@@ -36,9 +36,11 @@ defmodule WardrikPolicy.MiddlewareTest do
     assert {:ok, %Context{response: {:error, "No shell."}}} = run(context, "shell__exec")
   end
 
-  test "a call that asks parks on the question", %{context: context} do
-    assert {:park, %Ask{message: "books/create_bill needs your approval."}, _context} =
-             run(context, "books__create_bill")
+  test "a call that asks parks on the question, with the call it decided", %{context: context} do
+    assert {:park, %Ask{message: "books/create_bill needs your approval.", call: call}, _context} =
+             run(context, "books__create_bill", %{amount: 5})
+
+    assert %WardrikCore.ToolCall{name: "books__create_bill", arguments: %{"amount" => 5}} = call
   end
 
   test "the default turns on the tool's annotations", %{context: context} do
