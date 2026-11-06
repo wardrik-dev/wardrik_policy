@@ -14,7 +14,11 @@ end
 
 ## Decide a call
 
+Run in a fresh IEx session:
+
 ```elixir
+Mix.install([{:wardrik_policy, "~> 0.1.0-rc.2"}])
+
 policy =
   WardrikPolicy.new!(
     allow: ["web_search", "write_file(notes/*)"],
@@ -23,21 +27,26 @@ policy =
   )
 
 WardrikPolicy.decide(policy, "books__create_bill", arguments: %{"amount" => 9400})
-#=> {:ask, "A bill this size needs a person."}
+# => {:ask, "A bill this size needs a person."}
 ```
 
 - The strictest rule wins: deny, then ask, then allow.
 - A call no rule names follows `default:`, `:allow` by default.
-- `WardrikPolicy.explain/3` says which rule decided.
+- `WardrikPolicy.explain/3` returns the rule that determined the decision.
 
 ## Rules
 
 ```elixir
-"web_search"                         # a tool
-"github/*"                           # every tool from the github MCP server
-"write_file(notes/*)"                # what the call acts on, passed as resources:
-"books/create_bill(amount >= 1000)"  # an argument: =, !=, >, >=, < or <=
-"email/send(to != *@acme.com)"       # commas join conditions that must all hold
+# a tool
+"web_search"
+# every tool from the github MCP server
+"github/*"
+# what the call acts on, passed as resources:
+"write_file(notes/*)"
+# an argument: =, !=, >, >=, < or <=
+"books/create_bill(amount >= 1000)"
+# commas join conditions that must all hold
+"email/send(to != *@acme.com)"
 ```
 
 An MCP tool named `github__create_issue` also matches as `github/create_issue`.
@@ -52,10 +61,10 @@ policy =
   )
 
 WardrikPolicy.decide(policy, "github__list_issues", annotations: %{read_only: true})
-#=> :allow
+# => :allow
 
 WardrikPolicy.decide(policy, "github__close_issue")
-#=> {:ask, "github/close_issue needs your approval."}
+# => {:ask, "github/close_issue needs your approval."}
 ```
 
 - When a tool has several annotations, the strictest wins.
@@ -90,7 +99,8 @@ WardrikPolicy.decide(policy, "linear__create_issue",
   annotations: %{gated: true},
   labels: ["outside"]
 )
-#=> {:ask, "linear/create_issue is allowed, but this run has read content from outside, which may be what asked for it."}
+
+# => {:ask, "linear/create_issue is allowed, but this run has read content from outside, which may be what asked for it."}
 ```
 
 - A tool is gated when its annotations include `gated: true`.
@@ -119,7 +129,8 @@ WardrikPolicy.decide(policy, "books__pay_bill",
   arguments: %{"amount" => 1200},
   evaluate: fn _model, _call, _questions -> {:ok, [0.72], %{usd: 0.0001}} end
 )
-#=> {:ask, "Judged 72% likely: Does this call send money outside the company?"}
+
+# => {:ask, "Judged 72% likely: Does this call send money outside the company?"}
 ```
 
 - A judge's allow never overrides a rule's ask or deny.
@@ -132,7 +143,7 @@ WardrikPolicy.decide(policy, "books__pay_bill",
 policy = WardrikPolicy.new!(budget: [usd: 5.00, per: :day])
 
 WardrikPolicy.Budget.check(policy.budget, %{usd: 5.02})
-#=> {:ask, "This agent has spent $5.02 of $5.00 today. Approve to allow $5.00 more."}
+# => {:ask, "This agent has spent $5.02 of $5.00 today. Approve to allow $5.00 more."}
 ```
 
 The call that crosses the limit still runs. The next one asks. See `WardrikPolicy.Budget` for
@@ -140,30 +151,44 @@ The call that crosses the limit still runs. The next one asks. See `WardrikPolic
 
 ## Several policies
 
-Pass a list to hold an agent to your app's policy and its own:
+Pass a list to apply your app's policy and the agent's policy:
 
 ```elixir
 mine = WardrikPolicy.new!(deny: ["shell/*"])
 agents = WardrikPolicy.new!(allow: ["shell/*", "books/*"])
 
 WardrikPolicy.decide([mine, agents], "shell__exec")
-#=> {:deny, "shell/exec is not allowed for this agent."}
+# => {:deny, "shell/exec is not allowed for this agent."}
 ```
 
 The strictest decision wins. Each policy counts its own budget.
 
 ## With WardrikCore
 
+Set `ANTHROPIC_API_KEY` before starting IEx. In a fresh session:
+
 ```elixir
-WardrikCore.start_agent(
-  agent_id: "books",
-  model: "anthropic:claude-haiku-4-5",
-  middleware: [{WardrikPolicy.Middleware, policy}]
-)
+Mix.install([{:wardrik_policy, "~> 0.1.0-rc.2"}, {:wardrik_core, "~> 0.1.0-rc.4"}])
+
+children = [
+  {WardrikCore.Backends.MemoryStore, name: :agents},
+  {WardrikCore, backend: {WardrikCore.Backends.MemoryStore, name: :agents}}
+]
+
+{:ok, _supervisor} = Supervisor.start_link(children, strategy: :rest_for_one)
+
+policy = WardrikPolicy.new!(ask: ["books/*"])
+
+{:ok, agent} =
+  WardrikCore.start_agent(
+    agent_id: "books",
+    model: "anthropic:claude-haiku-4-5",
+    middleware: [{WardrikPolicy.Middleware, policy}]
+  )
 ```
 
-A call that asks waits on a `WardrikPolicy.Ask`. Answer it by tool call ID, or `"model"` for a
-budget:
+A call requiring approval returns a `WardrikPolicy.Ask`. After a call is parked, resume it with its call ID.
+Use `"model"` for a budget decision. The following fragments use illustrative call IDs; replace them with parked call IDs:
 
 ```elixir
 WardrikCore.resume(agent, %{"call_123" => :approve}, %{by: "user:maria"})
