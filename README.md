@@ -7,7 +7,7 @@ Rules, judges and budgets that decide what an agent may do and spend.
 ```elixir
 def deps do
   [
-    {:wardrik_policy, "~> 0.1.0-rc.2"}
+    {:wardrik_policy, "~> 0.1.0-rc.3"}
   ]
 end
 ```
@@ -17,7 +17,7 @@ end
 Run in a fresh IEx session:
 
 ```elixir
-Mix.install([{:wardrik_policy, "~> 0.1.0-rc.2"}])
+Mix.install([{:wardrik_policy, "~> 0.1.0-rc.3"}])
 
 policy =
   WardrikPolicy.new!(
@@ -168,7 +168,7 @@ The strictest decision wins. Each policy counts its own budget.
 Set `ANTHROPIC_API_KEY` before starting IEx. In a fresh session:
 
 ```elixir
-Mix.install([{:wardrik_policy, "~> 0.1.0-rc.2"}, {:wardrik_core, "~> 0.1.0-rc.4"}])
+Mix.install([{:wardrik_policy, "~> 0.1.0-rc.3"}, {:wardrik_core, "~> 0.1.0-rc.4"}])
 
 children = [
   {WardrikCore.Backends.MemoryStore, name: :agents},

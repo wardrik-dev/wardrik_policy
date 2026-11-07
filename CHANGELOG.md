@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-rc.3 (2026-11-06)
 
 - `WardrikPolicy.Ask` carries `call`, the tool call it decided. A call made inside another, such as a coding agent's request, is that call.
 
